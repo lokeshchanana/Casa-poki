@@ -6,40 +6,40 @@ This repository contains the complete configuration, compose setups, and automat
 
 ## 1. Architecture Overview
 
-- **Code Repository**: Hosted at `https://github.com/lokeshchanana/Casa-poki.git`. Contains all Docker Compose configurations, overrides, and recovery scripts. Excludes all secrets and live databases.
+- **Code Repository**: Hosted on GitHub (`lokeshchanana/Casa-poki.git`). Contains all Docker Compose configurations, overrides, and recovery scripts. Excludes all secrets and live databases.
 - **Persistent Data & Secrets (`/tank`)**:
   - Pool: ZFS pool `tank`
   - Secrets: Stored directly on `/tank/<service>/.env` with `0600` permissions.
-  - Symlinks: Linked from `/home/lokesh/Casa-poki/<service>/.env -> /tank/<service>/.env`.
-- **NFS / ZFS Mirror (`192.168.1.250`)**:
+  - Symlinks: Linked from `./<service>/.env -> /tank/<service>/.env`.
+- **Secondary ZFS / NFS Mirror**:
   - Remote ZFS pool: `nfspool`
   - Nightly snapshot and incremental replication runs automatically via `casa-poki-sync.timer` at 02:00 AM.
-  - NFS export: `192.168.1.250:/nfspool` (exported to `192.168.1.0/24`).
+  - NFS export: Exported to the authorized local LAN subnet for emergency mounting.
 
 ---
 
 ## 2. One-Command Restoration on Fresh Ubuntu Server
 
-On a freshly installed Ubuntu 22.04 LTS or 24.04 LTS machine:
+On a freshly installed Ubuntu LTS machine:
 
 ```bash
 # 1. Download and run the restoration engine as root
 curl -fsSL https://raw.githubusercontent.com/lokeshchanana/Casa-poki/main/scripts/restore-casa-poki.sh | sudo bash
 ```
 
-Or if you have already cloned the repository:
+Or execute directly from the cloned repository:
 
 ```bash
-sudo /home/lokesh/Casa-poki/scripts/restore-casa-poki.sh
+sudo ./scripts/restore-casa-poki.sh
 ```
 
 ### What the Script Automatically Restores:
 1. **System Tools**: Installs `zfsutils-linux`, `docker.io`, `docker-compose-plugin`, `nfs-common`, `git`, `rsync`, and dependencies.
-2. **User & Permissions**: Creates user `lokesh` and adds to `sudo` and `docker` groups.
+2. **User & Permissions**: Configures target user with Docker and administrative privileges.
 3. **ZFS Tank Recovery**:
    - Detects and imports existing physical ZFS drive (`zpool import -f tank`), OR
-   - Replicates `nfspool/tank` from the NFS server (`192.168.1.250`), OR
-   - Mounts `192.168.1.250:/tank` over NFS.
+   - Replicates `nfspool` from the backup server, OR
+   - Mounts the backup pool over NFS.
 4. **Secrets & Symlinks**: Automatically re-links all `.env` files from `/tank/<service>/.env` into the respective repository directories.
 5. **Docker Networks**: Recreates `postgres-network` and `relaticle-internal`.
 6. **Antigravity CLI**: Restores `agy` binary to `~/.local/bin/agy`, restores `settings.json`, configures user linger, and starts the systemd daemon.
@@ -48,9 +48,9 @@ sudo /home/lokesh/Casa-poki/scripts/restore-casa-poki.sh
 
 ---
 
-## 3. Manual Useful Commands
+## 3. Useful Maintenance Commands
 
-### Trigger Manual ZFS Replication to NFS Server:
+### Trigger Manual ZFS Replication to Secondary Host:
 ```bash
 sudo /usr/local/bin/casa-poki-sync.sh
 ```
@@ -61,12 +61,13 @@ systemctl status casa-poki-sync.timer
 journalctl -u casa-poki-sync.service -n 50 --no-pager
 ```
 
-### Check ZFS Datasets on NFS Server:
+### Inspect Remote Snapshots on Backup Server:
 ```bash
-ssh root@192.168.1.250 'zfs list -r nfspool/tank'
+ssh root@<BACKUP_HOST_IP> 'zfs list -t snapshot -r nfspool'
 ```
 
-### Mount /tank over NFS Manually:
+### Mount Backup Pool Over NFS Manually:
 ```bash
-sudo mount -t nfs 192.168.1.250:/tank /tank
+sudo mkdir -p /tank
+sudo mount -t nfs <BACKUP_HOST_IP>:/nfspool /tank
 ```

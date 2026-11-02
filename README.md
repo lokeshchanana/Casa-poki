@@ -1,6 +1,6 @@
 # Casa-poki Infrastructure & Service Architecture
 
-Welcome to **Casa-poki**, the unified homelab and production infrastructure server powering real estate applications, customer relationship management (CRM), workflow automations, local AI inference, networking, and home intelligence.
+Welcome to **Casa-poki**, a modular infrastructure and homelab architecture powering real estate applications, relationship management (CRM), workflow automations, local AI inference, networking, and home automation.
 
 ---
 
@@ -11,14 +11,14 @@ Welcome to **Casa-poki**, the unified homelab and production infrastructure serv
 4. [Service Catalog & Deep Dives](#4-service-catalog--deep-dives)
    - [Reverse Proxy & Ingress (`nginx`, `cloudflared`)](#reverse-proxy--ingress)
    - [CRM Stack (`twenty`, `relaticle`, `postgres-db`)](#crm-stack)
-   - [Automation & AI (`ai/n8n`, `agents`, `ollama`)](#automation--ai-stack)
-   - [Public Web Services (`real-estate`, `checkin`)](#public-web-services)
+   - [Automation & AI Stack (`ai/n8n`, `agents`, `ollama`)](#automation--ai-stack)
+   - [Web Platforms (`real-estate`, `checkin`)](#web-platforms)
    - [Observability & Monitoring (`monitor`)](#observability--monitoring)
    - [Network & Home Infrastructure (`adguard`, `habridge`, `mic-bridge`)](#network--home-infrastructure)
-   - [Antigravity AI Agent Instance](#antigravity-ai-agent-instance)
+   - [Antigravity AI Agent Engine](#antigravity-ai-agent-engine)
 5. [Port Matrix & Routing](#5-port-matrix--routing)
 6. [Bare-Metal Restore & Disaster Recovery Instructions](#6-bare-metal-restore--disaster-recovery-instructions)
-7. [Operational & Safety Rules](#7-operational--safety-rules)
+7. [Operational & Security Guidelines](#7-operational--security-guidelines)
 
 ---
 
@@ -26,61 +26,61 @@ Welcome to **Casa-poki**, the unified homelab and production infrastructure serv
 
 ```mermaid
 flowchart TB
-    Internet(("Internet / Public Users"))
+    Users(("Public / External Users"))
 
-    subgraph Cloudflare["Cloudflare Zero Trust Edge"]
-        CFTunnel["Cloudflare Tunnel<br/>(*.lokeshchanana.com)"]
+    subgraph Edge["Zero-Trust Ingress Edge"]
+        CFTunnel["Cloudflare Tunnel<br/>(Outbound Encrypted Tunnel)"]
     end
 
-    subgraph CasaPoki["Casa-poki Server (192.168.1.240)"]
+    subgraph CasaPoki["Primary Host Server (Casa-poki)"]
         subgraph Ingress["Ingress Layer"]
-            CFContainer["cloudflared<br/>(Tunnel Container)"]
-            Nginx["Nginx Reverse Proxy<br/>(80 / 443 + SSL Certs)"]
+            CFContainer["cloudflared<br/>(Tunnel Client)"]
+            Nginx["Nginx Reverse Proxy<br/>(SSL Termination & Routing)"]
         end
 
         subgraph Apps["Application & Business Layer"]
-            RealEstateProd["real-estate<br/>(:8088 -> lokeshchanana.com)"]
-            RealEstateDev["real-estate-dev<br/>(:8089 -> dev.lokeshchanana.com)"]
-            CheckinApp["checkin-app<br/>(:8091 -> checkin)"]
-            TwentyCRM["Twenty CRM<br/>(:8085 -> twenty.lokeshchanana.com)"]
-            RelaticleCRM["Relaticle CRM<br/>(relaticle.lokeshchanana.com)"]
-            N8N["n8n Automation<br/>(:5678 -> n8n.lokeshchanana.com)"]
-            AgentHub["Agent Hub<br/>(:8094)"]
+            RealEstateProd["real-estate<br/>(Production Web)"]
+            RealEstateDev["real-estate-dev<br/>(Staging Web)"]
+            CheckinApp["checkin-app<br/>(Visitor Intake Kiosk)"]
+            TwentyCRM["Twenty CRM<br/>(Server & Worker)"]
+            RelaticleCRM["Relaticle CRM<br/>(Core App & Horizon Worker)"]
+            N8N["n8n Automation Engine<br/>(Workflows & Webhooks)"]
+            AgentHub["Agent Hub<br/>(Autonomous Multi-Agent System)"]
         end
 
         subgraph DataAI["Data & AI Layer"]
-            PostgresShared["postgres<br/>(:5432 - Relaticle DB)"]
-            TwentyDB["twenty-postgres<br/>(Twenty CRM DB)"]
+            PostgresShared["postgres<br/>(Relational CRM Database)"]
+            TwentyDB["twenty-postgres<br/>(Twenty Data Store)"]
             RedisTwenty["twenty-redis"]
             RedisRelaticle["crm-redis"]
-            Ollama["ollama<br/>(:11434 - crm-qwen:3b)"]
+            Ollama["ollama<br/>(Local LLM Inference)"]
         end
 
         subgraph Infrastructure["Infrastructure & Monitoring"]
-            UptimeKuma["uptime-kuma (:3001)"]
-            Beszel["beszel hub (:8095) + agent"]
-            AdGuard["adguardhome (:53, :8053, :3030)"]
-            HABridge["habridge (:9123)"]
-            MicBridge["mic-bridge (MQTT Beat Sync)"]
+            UptimeKuma["uptime-kuma (Health Checks)"]
+            Beszel["beszel hub + agent (System Metrics)"]
+            AdGuard["adguardhome (DNS Sinkhole & Filter)"]
+            HABridge["habridge (IoT Device Bridge)"]
+            MicBridge["mic-bridge (Audio Frequency Sync)"]
         end
 
-        subgraph LocalStorage["ZFS Pool: tank (/tank on sda)"]
-            TankData["/tank/<service>/<br/>- Persistent Volumes<br/>- .env Secrets (0600)"]
-            AGYBackup["/tank/antigravity-backup/<br/>- agy binary + settings.json"]
+        subgraph LocalStorage["ZFS Storage Pool (tank)"]
+            TankData["/tank/<service>/<br/>- Persistent Application Data<br/>- Isolated Secrets (.env, 0600)"]
+            AGYBackup["/tank/antigravity-backup/<br/>- Agent Binaries & Configuration"]
         end
 
-        subgraph AgentEngine["Antigravity CLI Daemon"]
-            AGYDaemon["agy remote-control serve<br/>(systemd user daemon)"]
+        subgraph AgentEngine["Antigravity Daemon"]
+            AGYDaemon["agy remote-control serve<br/>(Systemd User Service)"]
         end
 
-        ReplicationTimer["casa-poki-sync.timer<br/>(Nightly 02:00 AM)"]
+        ReplicationTimer["casa-poki-sync.timer<br/>(Nightly Automated Sync)"]
     end
 
-    subgraph NFSServer["NFS Backup Server (192.168.1.250)"]
-        NFSPool["ZFS Pool: nfspool<br/>- Mirrored Datasets<br/>- sharenfs Export: /nfspool"]
+    subgraph NFSServer["NFS / Offsite Mirror Host"]
+        NFSPool["ZFS Pool: nfspool<br/>- Incremental Snapshot Mirror<br/>- NFS LAN Share Export"]
     end
 
-    Internet --> CFTunnel
+    Users --> CFTunnel
     CFTunnel --> CFContainer
     CFContainer --> Nginx
     Nginx --> Apps
@@ -88,62 +88,59 @@ flowchart TB
     Apps --> LocalStorage
     DataAI --> LocalStorage
     Infrastructure --> LocalStorage
-    ReplicationTimer -- "zfs send | ssh zfs receive" --> NFSPool
+    ReplicationTimer -- "zfs send -R -I | ssh zfs receive" --> NFSPool
 ```
 
 ---
 
 ## 2. Storage & Secrets Architecture
 
-Casa-poki segregates application code from persistent state and credentials using a dedicated ZFS storage pool.
+Casa-poki enforces total physical separation between application code, application runtime state, and secrets.
 
 ### ZFS Pool: `tank`
-- **Physical Drive**: Dedicated 500GB SSD (`/dev/sda`).
-- **Mountpoint**: `/tank`.
+- **Mountpoint**: `/tank`
+- **Volume Design**: Independent ZFS datasets for each application domain, providing snapshot isolation, compression, and snapshot rollbacks.
 - **Datasets**:
-  | Dataset | Mountpoint | Purpose |
-  | :--- | :--- | :--- |
-  | `tank` | `/tank` | Root dataset (contains `twenty`, `mic-bridge`, `cloudflared`, `antigravity-backup`) |
-  | `tank/adguard` | `/tank/adguard` | AdGuard Home DNS configurations and query logs |
-  | `tank/habridge` | `/tank/habridge` | HA-Bridge device definitions and rules |
-  | `tank/monitor` | `/tank/monitor` | Uptime Kuma SQLite database and Beszel metrics store |
-  | `tank/n8n` | `/tank/n8n` | n8n workflow engine SQLite database, custom nodes, storage |
-  | `tank/npm` | `/tank/npm` | Nginx configuration files (`conf.d/`) and Let's Encrypt certificates (`certs/`) |
-  | `tank/ollama` | `/tank/ollama` | Ollama LLM model weights (`crm-qwen:3b`) |
-  | `tank/postgres-db` | `/tank/postgres-db` | PostgreSQL 17 data directory for Relaticle CRM |
-  | `tank/re_office_data`| `/tank/re_office_data` | Office 365 OAuth tokens and sync state |
-  | `tank/relaticle` | `/tank/relaticle` | Relaticle CRM file storage, OAuth keys, and Redis append-only files |
+  | Dataset | Purpose |
+  | :--- | :--- |
+  | `tank` | Root dataset (contains core volumes and backup archives) |
+  | `tank/adguard` | AdGuard Home DNS configuration, query filters, and upstream records |
+  | `tank/habridge` | HA-Bridge smart home virtual devices and configuration |
+  | `tank/monitor` | Uptime Kuma and Beszel metric stores and monitoring history |
+  | `tank/n8n` | n8n workflow execution database, custom nodes, and file storage |
+  | `tank/npm` | Nginx reverse proxy configuration and automated SSL certificates |
+  | `tank/ollama` | Local LLM weights and neural model configurations |
+  | `tank/postgres-db` | PostgreSQL 17 relational database files |
+  | `tank/re_office_data`| Office 365 synchronization state and cached tokens |
+  | `tank/relaticle` | Relaticle CRM file storage, OAuth keys, and Redis state |
 
-### Secrets Hygiene
-- **Strict Isolation**: No secret, API key, password, or `.env` file is ever committed to Git.
-- **Physical Location**: All service secrets reside directly in `/tank/<service>/.env` with strict `0600` permissions (`lokesh:lokesh`).
-- **Symlink Wiring**: Repositories connect to secrets via symlinks (`/home/lokesh/Casa-poki/<service>/.env -> /tank/<service>/.env`).
-- **Templates**: Every service repository includes a clean, sanitized `.env.example` defining variable requirements for documentation and fresh deployments.
+### Secrets Management & Hygiene
+- **Zero Leak Policy**: No secret, password, private key, token, or `.env` file is ever committed to version control.
+- **Location on Host**: All service credentials reside exclusively on `/tank/<service>/.env` with restricted `0600` permissions.
+- **Repo Connection**: Services in the repository connect to their credentials via symlinks (`.env -> /tank/<service>/.env`).
+- **Templates**: Every service repository includes a sanitized `.env.example` file documenting required configuration keys without sensitive values.
 
 ---
 
 ## 3. Backup, Replication & Disaster Recovery
 
-Casa-poki utilizes native, block-level ZFS snapshot replication to a separate physical ZFS storage server.
+Casa-poki relies on native, block-level ZFS replication to a dedicated secondary ZFS host for offsite disaster recovery.
 
-### Backup Server Configuration
-- **Host**: `192.168.1.250` (`casa-poki-nfs`)
-- **Storage**: ZFS pool `nfspool` (899 GB available)
-- **NFS Share**: `192.168.1.250:/nfspool` exported to `192.168.1.0/24` with `no_root_squash`
+### Replication Architecture
+- **Secondary Host**: Network-attached ZFS pool (`nfspool`).
+- **Protocol**: Encrypted SSH stream carrying native ZFS send/receive streams.
+- **Failover NFS Export**: The secondary ZFS pool is exported with NFS read/write permissions for instant network mounting during hardware maintenance.
 
-### Automated Nightly Synchronization
-- **Engine**: `/usr/local/bin/casa-poki-sync.sh` (versioned at `scripts/casa-poki-sync.sh`)
-- **Schedule**: `casa-poki-sync.timer` triggers every morning at **02:00 AM**.
-- **Execution Workflow**:
-  1. Copies current Antigravity binary (`~/.local/bin/agy`), user settings (`~/.gemini`), and daemon unit to `/tank/antigravity-backup/`.
-  2. Finds the latest common snapshot between `tank` and remote `nfspool`.
-  3. Creates a new recursive snapshot `tank@daily-YYYYMMDD-HHMMSS`.
-  4. Streams an incremental recursive ZFS package:
-     ```bash
-     zfs send -R -I tank@<previous> tank@daily-<today> | ssh root@192.168.1.250 "zfs receive -F -d nfspool"
-     ```
-  5. Automatically prunes snapshots older than 14 days on both source and destination pools.
-  6. Logs execution output to `/var/log/casa-poki-sync.log`.
+### Automated Incremental Synchronization
+- **Schedule**: Nightly automated sync via systemd timer (`casa-poki-sync.timer`) at 02:00 AM.
+- **Script**: `/usr/local/bin/casa-poki-sync.sh` (source-controlled in `scripts/casa-poki-sync.sh`).
+- **Workflow**:
+  1. Archives local Antigravity AI agent binaries and settings to `/tank/antigravity-backup/`.
+  2. Resolves latest common snapshot between source (`tank`) and target (`nfspool`).
+  3. Creates recursive local snapshot `tank@daily-<timestamp>`.
+  4. Streams compressed incremental delta to the secondary host.
+  5. Automatically prunes snapshots older than 14 days on both hosts to optimize storage.
+  6. Writes execution logs to `/var/log/casa-poki-sync.log`.
 
 ---
 
@@ -151,168 +148,138 @@ Casa-poki utilizes native, block-level ZFS snapshot replication to a separate ph
 
 ### Reverse Proxy & Ingress
 - **`nginx`** (`nginx/`):
-  - Image: `nginx:alpine`
-  - Ports: `80:80`, `443:443`
-  - Volumes: `/tank/npm/conf.d:/etc/nginx/conf.d:ro`, `/tank/npm/certs:/etc/nginx/certs:ro`
-  - SSL Automation: Wildcard certificates for `*.lokeshchanana.com` are auto-renewed daily via `/etc/cron.daily/certbot-renew` using Cloudflare DNS verification.
+  - High-performance reverse proxy for internal routing and SSL termination.
+  - Configuration mounted read-only from `/tank/npm/conf.d`.
+  - Let's Encrypt wildcard certificates automated via Certbot DNS challenge.
 - **`cloudflared`** (`cloudflared/`):
-  - Image: `cloudflare/cloudflared:latest`
-  - Outbound zero-trust tunnel routing public traffic directly into internal services without forwarding ports on the router.
+  - Zero-Trust tunnel client establishing encrypted outbound tunnels to Cloudflare.
+  - Exposes public services without exposing host firewall ports or requiring static public IPs.
 
 ### CRM Stack
 - **`twenty`** (`twenty/`):
-  - Services: `twenty-server` (:8085), `twenty-worker`, `twenty-postgres`, `twenty-redis`
-  - Configuration: Self-hosted Twenty CRM connected to Brevo email marketing and automated n8n webhooks.
-  - Storage: `/tank/twenty/data`, `/tank/twenty/db`, `/tank/twenty/redis`.
+  - Modern CRM stack running application server, background queue worker, PostgreSQL, and Redis cache.
+  - Handles client contacts, sales pipelines, and task schedules.
 - **`relaticle`** (`relaticle/`):
-  - Services: `crm-app` (:8085 internal), `crm-horizon`, `crm-scheduler`, `crm-redis`
-  - Stack: Laravel, Filament PHP, Redis queue worker.
-  - Storage: `/tank/relaticle/storage`, `/tank/relaticle/redis`.
+  - Comprehensive relationship management platform running Laravel, Filament PHP, and Horizon Redis queue workers.
 - **`postgres-db`** (`postgres-db/`):
-  - Image: `postgres:17-alpine` on port `5432`.
-  - Serves as the primary relational database for Relaticle.
-  - Storage: `/tank/postgres-db/data`.
+  - Dedicated PostgreSQL 17 Alpine instance providing relational database services for CRM workloads.
 
 ### Automation & AI Stack
 - **`ai/n8n`** (`ai/n8n/`):
-  - Image: `docker.n8n.io/n8nio/n8n:latest` on port `5678`.
-  - Fully integrated with Gemini API (`GEMINI_API_KEY`), Twenty CRM, Google Sheets, Brevo, and Google Business Profile.
-  - Storage: `/tank/n8n`.
+  - Advanced node-based workflow automation engine connecting CRM instances, marketing platforms, and AI APIs.
 - **`agents`** (`agents/`):
-  - Service: `agent-hub` on port `8094`.
-  - Autonomous background agent system reading n8n SQLite catalog, scheduling tasks, and executing local tool operations.
+  - Autonomous agent hub coordinating background tool runs and database synchronization.
 - **`ollama`** (`ollama/`):
-  - Service: `ollama` on port `11434`.
-  - Runs local model `crm-qwen:3b` for privacy-first CRM categorization and text completions.
-  - Storage: `/tank/ollama/model`.
+  - Local GPU/CPU neural network inference server hosting private language models for CRM categorization and extraction.
 
-### Public Web Services
+### Web Platforms
 - **`real-estate`** (`real-estate/`):
-  - Production website: `real-estate` on port `8088` (`https://lokeshchanana.com`).
-  - Staging website: `real-estate-dev` on port `8089` (`https://dev.lokeshchanana.com`).
-  - Stack: React, Vite, Tailwind CSS, pre-rendered routes, VCF contact card generator, Instagram Reels dynamic sync.
-  - **Mandatory Workflow**: Dev-before-prod. Never modify production without review on dev.
+  - High-speed responsive web platform built with React, Vite, Tailwind CSS, and route pre-rendering.
+  - Staging (`real-estate-dev`) and production (`real-estate`) instances with strict dev-first promotion workflows.
 - **`checkin`** (`checkin/`):
-  - Service: `checkin-app` on port `8091`.
-  - Responsive visitor sign-in kiosk app used during open houses, pushing leads instantly to n8n and Twenty CRM.
+  - Interactive visitor registration kiosk app for open house visitor intake.
 
 ### Observability & Monitoring
 - **`monitor`** (`monitor/`):
-  - **Beszel Hub** (`beszel` on port `8095` -> `8090` internal, public at `beszel.lokeshchanana.com`) + **Beszel Agent** (`beszel-agent` in host mode on port `45876`) for system CPU, memory, disk, and docker container stats.
-  - **Uptime Kuma** (`uptime-kuma` on port `3001:3001`) with persistent SQLite storage in `/tank/monitor/uptime-kuma`, monitoring uptime for all local and external services.
+  - **Beszel Hub & Agent**: Resource monitoring framework providing real-time CPU, RAM, disk, and container metrics.
+  - **Uptime Kuma**: Self-hosted uptime monitor providing heartbeat checks, response time metrics, and alert triggers.
 
 ### Network & Home Infrastructure
 - **`adguard`** (`adguard/`):
-  - Network-wide DNS sinkhole on port `53` (TCP/UDP), web interface on `:8053`, and initial setup on `:3030`.
+  - Network-wide DNS sinkhole, tracker blocking, and local hostname resolution.
 - **`habridge`** (`habridge/`):
-  - Philips Hue emulator on port `9123` for smart home device bridging.
+  - Local IoT device emulator bridging smart home peripherals.
 - **`mic-bridge`** (`mic-bridge/`):
-  - Python ALSA audio capture bridge with FFT frequency analysis publishing real-time beat/volume metrics to Home Assistant over MQTT.
+  - Audio capture and FFT spectrum analysis bridge broadcasting lighting sync pulses via MQTT.
 
-### Antigravity AI Agent Instance
-- **Daemon**: `/home/lokesh/.local/bin/agy remote-control serve`
-- **Systemd User Service**: `antigravity-cli-daemon.service`
-- **Persistence**: User session lingering enabled (`loginctl enable-linger lokesh`), ensuring agents run continuously across server reboots.
-- **Config & Brain**: `~/.gemini/antigravity-cli/settings.json`.
+### Antigravity AI Agent Engine
+- **Service**: `antigravity-cli-daemon.service` running as a systemd user daemon.
+- **Linger Configuration**: Enabled (`loginctl enable-linger`) to persist agent availability across sessions.
+- **Backup**: Binaries, user configuration, and plugin states are backed up inside `/tank/antigravity-backup/`.
 
 ---
 
 ## 5. Port Matrix & Routing
 
-| Port | Service Container | Internal Destination | Public Hostname (Cloudflare/Nginx) |
+| Port | Service Container | Primary Role | Ingress Route |
 | :--- | :--- | :--- | :--- |
-| **80 / 443** | `nginx` | Host Nginx Ingress | Local LAN / SSL Termination |
-| **3001** | `uptime-kuma` | Uptime Monitor UI | `status.lokeshchanana.com` |
-| **3030 / 8053** | `adguardhome` | AdGuard Web UI | Local LAN (`http://192.168.1.240:8053`) |
-| **5432** | `postgres` | PostgreSQL 17 DB | Internal docker network (`postgres-network`) |
-| **5678** | `n8n` | n8n Automation Engine | `https://n8n.lokeshchanana.com` |
-| **8085** | `twenty-server` | Twenty CRM Server | `https://twenty.lokeshchanana.com` |
-| **8088** | `real-estate` | Production Real Estate Web | `https://lokeshchanana.com` |
-| **8089** | `real-estate-dev` | Staging Real Estate Web | `https://dev.lokeshchanana.com` |
-| **8091** | `checkin-app` | Open House Sign-In Web | `https://checkin.lokeshchanana.com` |
-| **8094** | `agent-hub` | Autonomous Agent Hub | Internal LAN (`http://192.168.1.240:8094`) |
-| **8095** | `beszel` | Beszel Metrics Hub | `https://beszel.lokeshchanana.com` |
-| **9123** | `habridge` | HA-Bridge IoT Emulator | Local LAN (`http://192.168.1.240:9123`) |
-| **11434**| `ollama` | Local LLM Engine | Internal LAN (`http://192.168.1.240:11434`) |
-| **45876**| `beszel-agent` | Beszel Metric Exporter | Localhost / Internal metrics |
+| **80 / 443** | `nginx` | HTTP / HTTPS Ingress | Local LAN / Gateway |
+| **3001** | `uptime-kuma` | Uptime Monitor UI | Cloudflare Tunnel / Status Subdomain |
+| **3030 / 8053** | `adguardhome` | AdGuard Web Interface | Local LAN Only |
+| **5432** | `postgres` | Relational Database | Internal Docker Network |
+| **5678** | `n8n` | Workflow Automation | Cloudflare Tunnel / Automation Subdomain |
+| **8085** | `twenty-server` | Twenty CRM Server | Cloudflare Tunnel / CRM Subdomain |
+| **8088** | `real-estate` | Production Web Platform | Cloudflare Tunnel / Main Domain |
+| **8089** | `real-estate-dev` | Staging Web Platform | Cloudflare Tunnel / Dev Subdomain |
+| **8091** | `checkin-app` | Visitor Registration Kiosk | Cloudflare Tunnel / Checkin Subdomain |
+| **8094** | `agent-hub` | Autonomous Multi-Agent API | Local LAN / Internal Docker Network |
+| **8095** | `beszel` | System Metrics Hub | Cloudflare Tunnel / Metrics Subdomain |
+| **9123** | `habridge` | Smart Home Bridge | Local LAN Only |
+| **11434**| `ollama` | Local AI Inference | Local LAN / Internal Docker Network |
+| **45876**| `beszel-agent` | Metric Collector Daemon | Host Internal Loopback |
 
 ---
 
 ## 6. Bare-Metal Restore & Disaster Recovery Instructions
 
-If the physical server suffers total hardware failure, you can rebuild the entire Casa-poki environment on a fresh Ubuntu 22.04 LTS or 24.04 LTS machine with a single command.
+In the event of hardware failure, the entire system can be rebuilt on a fresh Ubuntu LTS host using the automated recovery engine.
 
-### Automated One-Command Recovery
-On a fresh Ubuntu installation:
+### Automated Recovery
+Run the automated restore script as root:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lokeshchanana/Casa-poki/main/scripts/restore-casa-poki.sh | sudo bash
 ```
 
-Or if you have the repository cloned:
+Or execute directly from the cloned repository:
 
 ```bash
-sudo /home/lokesh/Casa-poki/scripts/restore-casa-poki.sh
+sudo ./scripts/restore-casa-poki.sh
 ```
 
-### What the Restore Engine Automates:
-1. **Package Provisioning**: Installs `zfsutils-linux`, `docker.io`, `docker-compose-plugin`, `nfs-common`, `git`, `rsync`, and `jq`.
-2. **User Account**: Configures user `lokesh` with passwordless Docker and sudo access.
-3. **ZFS Tank Recovery**:
-   - Detects and re-imports an existing physical drive (`zpool import -f tank`), **OR**
-   - Receives the latest ZFS snapshot stream from `192.168.1.250` onto a new disk, **OR**
-   - Mounts `192.168.1.250:/nfspool` directly over NFS.
-4. **Secrets & Symlinks Restoration**: Automatically links `/tank/<service>/.env` to `/home/lokesh/Casa-poki/<service>/.env`.
-5. **Docker Infrastructure**: Recreates required external bridge networks (`postgres-network`, `relaticle-internal`).
-6. **Antigravity AI Environment**:
-   - Restores the `agy` binary to `~/.local/bin/agy`.
-   - Restores configuration and `settings.json` to `~/.gemini/antigravity-cli/`.
-   - Restores and activates `antigravity-cli-daemon.service` under user systemd.
-   - Enables persistent user lingering (`loginctl enable-linger lokesh`).
-7. **Container Startup**: Launches all 13 application stacks in strict dependency order with automated health verification.
-8. **Replication Activation**: Installs and activates `casa-poki-sync.timer` for ongoing 02:00 AM nightly replication.
+### Recovery Automation Steps:
+1. **Tooling & Runtimes**: Automatically installs `zfsutils-linux`, `docker.io`, `docker-compose-plugin`, `nfs-common`, `git`, and utilities.
+2. **User Configuration**: Configures the primary system user with appropriate group permissions for Docker and administration.
+3. **Storage Pool Recovery**:
+   - Re-imports existing physical pool (`tank`), OR
+   - Recreates pool and streams latest snapshots from the backup server, OR
+   - Mounts the backup pool directly over NFS for instant recovery.
+4. **Secrets & Symlinks**: Automatically reconnects `/tank/<service>/.env` secrets to their respective service directories.
+5. **Docker Infrastructure**: Rebuilds necessary external bridge networks (`postgres-network`, `relaticle-internal`).
+6. **Antigravity AI Engine**: Restores agent binaries, settings, enables system linger, and starts the systemd service.
+7. **Service Startup**: Launches all compose stacks in verified dependency order with healthchecks.
+8. **Scheduled Tasks**: Installs and activates `casa-poki-sync.timer` for ongoing daily replication.
 
-### Manual Maintenance & Verification Commands
+### Useful Maintenance Commands
 
-- **Run an Instant ZFS Replication to NFS Server**:
+- **Manual Trigger for Snapshot Replication**:
   ```bash
   sudo /usr/local/bin/casa-poki-sync.sh
   ```
-- **Check Replication Status & Logs**:
+- **Inspect Replication Timer & Status**:
   ```bash
   systemctl status casa-poki-sync.timer
-  cat /var/log/casa-poki-sync.log | tail -n 30
-  ```
-- **Inspect Remote Snapshots on NFS Server**:
-  ```bash
-  ssh root@192.168.1.250 'zfs list -t snapshot -r nfspool'
-  ```
-- **Mount Remote /nfspool Over NFS Manually**:
-  ```bash
-  sudo mkdir -p /tank
-  sudo mount -t nfs 192.168.1.250:/nfspool /tank
+  journalctl -u casa-poki-sync.service -n 50 --no-pager
   ```
 
 ---
 
-## 7. Operational & Safety Rules
+## 7. Operational & Security Guidelines
 
-All automated agents, scripts, and developers working on Casa-poki must strictly follow these rules:
+All agents, scripts, and administrators working on Casa-poki must strictly follow these rules:
 
-1. **Zero Stray Communications (Live Safety)**:
+1. **Zero Stray Communications**:
    - All production services (CRM, n8n, Relaticle, Check-in, Webhooks, Real Estate) are LIVE.
-   - Never use fake or random emails/numbers. If any test triggers an email or SMS, **ONLY** use verified owner details:
-     - **Email:** `lokeshchanana@gmail.com`
-     - **Phone:** `8018601052`
-   - Test records inserted into Twenty CRM or databases must be deleted immediately after verification.
+   - Never use fake or random emails or phone numbers. Any automated test requiring outbound messaging must strictly use verified owner contact details configured in the secure environment.
+   - Test or dummy records created during automated verification must be deleted immediately after testing.
 2. **Dev-Before-Production Promotion**:
-   - Website changes must be staged on `dev.lokeshchanana.com` (`real-estate-dev` on port 8089) first.
-   - Never rebuild `real-estate` production container without explicit user approval.
+   - Web platform modifications must first be staged and validated on the staging container (`real-estate-dev`).
+   - Production web services must never be updated or rebuilt without explicit authorization.
 3. **Plan-First Execution**:
-   - Multi-step tasks or architecture modifications require a clear plan approved before execution.
+   - Any multi-step task, architectural change, or system update requires an approved plan before execution.
 4. **Mandatory Post-Task Sync & Secret Hygiene**:
-   - All secrets must reside on `/tank/<service>/.env` (`0600`), never staged in Git.
-   - Code changes must be committed and pushed to `https://github.com/lokeshchanana/Casa-poki.git`.
-   - Maintain the nightly replication (`casa-poki-sync.timer`) to `192.168.1.250`.
+   - All secrets must reside exclusively in `/tank/<service>/.env` (`chmod 600`), never staged in Git.
+   - All code, configuration, or documentation changes must be pushed to GitHub upon task completion.
+   - Continuous replication to the secondary backup host must be maintained.
 5. **Continuous Disaster Recovery Maintenance**:
-   - After every major architectural change (adding a new service, new container, altered volume mounts, network adjustments, or ZFS dataset modifications), always verify and update `scripts/restore-casa-poki.sh` and `README.md` so the bare-metal restore engine stays 100% current and tested.
+   - After any major change (such as adding a container, altering volume mounts, or adjusting ZFS datasets), verify and update `scripts/restore-casa-poki.sh` and `README.md` to ensure bare-metal recovery remains 100% turnkey.
