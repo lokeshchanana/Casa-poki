@@ -1,0 +1,14 @@
+services:
+  mic-bridge:
+    build: .
+    image: party-mic-bridge:latest
+    container_name: party-mic-bridge
+    restart: unless-stopped
+    devices:
+      - /dev/snd:/dev/snd
+    group_add:
+      - "29"
+    env_file:
+      - .env
+    volumes:
+      - ./bridge.py:/app/bridge.py:ro

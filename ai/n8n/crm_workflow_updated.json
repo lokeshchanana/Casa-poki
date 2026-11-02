@@ -1,0 +1,270 @@
+[
+  {
+    "updatedAt": "2026-10-06T23:19:58.000Z",
+    "createdAt": "2026-10-06T22:08:03.329Z",
+    "id": "crmRelaticleAssistant",
+    "name": "Relaticle CRM Assistant",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+      {
+        "id": "node-chat",
+        "name": "When chat message received",
+        "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+        "typeVersion": 1.4,
+        "position": [
+          380,
+          240
+        ],
+        "webhookId": "relaticle-crm-chat",
+        "parameters": {
+          "public": true,
+          "mode": "hostedChat",
+          "initialMessages": "Hello! I am your Relaticle CRM assistant. How can I help you today? (e.g. search contacts, update phone numbers, toggle email permissions, create contacts)",
+          "options": {
+            "title": "Relaticle CRM AI Assistant",
+            "subtitle": "Powered by local Ollama on casa-poki",
+            "inputPlaceholder": "Type a message or instruction...",
+            "responseMode": "streaming"
+          },
+          "availableInChat": true,
+          "agentName": "Relaticle CRM Assistant",
+          "agentDescription": "Search contacts, update phone numbers, toggle email permissions, and create contacts in Relaticle CRM.",
+          "agentIcon": {
+            "type": "icon",
+            "value": "bot"
+          },
+          "suggestedPrompts": {
+            "prompts": [
+              {
+                "text": "Search for Dave"
+              },
+              {
+                "text": "Update phone number for Dave to +16839856423"
+              },
+              {
+                "text": "Change can email for Steve to False"
+              },
+              {
+                "text": "Add a new contact"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "node-agent",
+        "name": "AI Agent",
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 2.2,
+        "position": [
+          600,
+          240
+        ],
+        "parameters": {
+          "promptType": "auto",
+          "options": {
+            "systemMessage": "You are an intelligent, accurate, and helpful assistant for Relaticle CRM running locally.\nYou have tools to interact with the CRM:\n1. `search_contacts`: Search for contacts by name or query string.\n2. `update_contact`: Update an existing contact's fields (e.g. phone number, can_email, name).\n3. `create_contact`: Add a brand new contact.\n\nSTRICT INSTRUCTIONS:\n- Whenever the user asks to look up, view, or modify an existing contact (for example, \"update phone of Dave to 683-985-6423\", \"change can email for Steve to False\"), you MUST FIRST run `search_contacts` to find the contact and obtain their exact `id`.\n- Once you have the contact `id`, execute `update_contact` passing the `id` and the parameters to update.\n  - If updating a phone number: pass `phone_number`.\n  - If updating email permission: pass `can_email` as \"True\" or \"False\".\n  - If updating name: pass `name`.\n- If the user asks to add or create a person, use `create_contact`.\n- Always respond with a concise, polite confirmation of what actions were taken and what was updated."
+          }
+        }
+      },
+      {
+        "id": "node-ollama",
+        "name": "Ollama Chat Model",
+        "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+        "typeVersion": 1,
+        "position": [
+          480,
+          460
+        ],
+        "parameters": {
+          "model": "crm-qwen:3b",
+          "options": {
+            "temperature": 0.2
+          }
+        },
+        "credentials": {
+          "ollamaApi": {
+            "id": "ollamaLocalCreds",
+            "name": "Ollama account"
+          }
+        }
+      },
+      {
+        "id": "node-memory",
+        "name": "Window Buffer Memory",
+        "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+        "typeVersion": 1.3,
+        "position": [
+          600,
+          460
+        ],
+        "parameters": {
+          "sessionKey": "={{ $('When chat message received').first().json.sessionId || 'default' }}",
+          "contextWindowLength": 5,
+          "sessionIdType": "customKey"
+        }
+      },
+      {
+        "id": "node-search",
+        "name": "search_contacts",
+        "type": "@n8n/n8n-nodes-langchain.toolCode",
+        "typeVersion": 1.1,
+        "position": [
+          740,
+          460
+        ],
+        "parameters": {
+          "name": "search_contacts",
+          "description": "Search for contacts in Relaticle CRM by name or query string. Returns matching contacts with ID, name, phone numbers, and custom fields.",
+          "specifyInputSchema": true,
+          "schemaType": "manual",
+          "inputSchema": "{\"type\": \"object\", \"properties\": {\"query\": {\"type\": \"string\", \"description\": \"Name or search term of the contact\"}}, \"required\": [\"query\"]}",
+          "jsCode": "\nconst requestCrm = async (endpoint, method = 'GET', body = null) => {\n  const http = require('http');\n  return new Promise((resolve, reject) => {\n    const headers = {\n      'Authorization': 'Bearer 2|JzLpq8SvB7EsRRks5NzFZwwtZTubJ2jEMD3RTklP57b33a88',\n      'Accept': 'application/json'\n    };\n    if (body) {\n      headers['Content-Type'] = 'application/json';\n    }\n    const req = http.request({\n      hostname: '192.168.1.240',\n      port: 8085,\n      path: endpoint,\n      method: method,\n      headers: headers\n    }, (res) => {\n      let data = '';\n      res.on('data', chunk => data += chunk);\n      res.on('end', () => {\n        try {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: JSON.parse(data)\n          });\n        } catch (e) {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: data\n          });\n        }\n      });\n    });\n    req.on('error', reject);\n    if (body) {\n      req.write(typeof body === 'string' ? body : JSON.stringify(body));\n    }\n    req.end();\n  });\n};\n\nlet rawInput = {};\ntry { rawInput = query; } catch (e) { try { rawInput = input; } catch (e2) { rawInput = {}; } }\n\nlet searchTerm = '';\nif (typeof rawInput === 'string') {\n  try {\n    const p = JSON.parse(rawInput);\n    searchTerm = p.query || p.name || rawInput;\n  } catch (e) {\n    searchTerm = rawInput;\n  }\n} else if (rawInput && typeof rawInput === 'object') {\n  searchTerm = rawInput.query || rawInput.name || '';\n}\n\nconst endpoint = '/api/v1/people' + (searchTerm ? '?filter[name]=' + encodeURIComponent(searchTerm.trim()) : '');\nconst res = await requestCrm(endpoint, 'GET');\nconst results = ((res.data && res.data.data) || []).map(p => {\n  const attrs = p.attributes || {};\n  const cf = attrs.custom_fields || {};\n  return {\n    id: p.id,\n    name: attrs.name || p.name,\n    phone_numbers: (cf.phone_number || []).map(x => (typeof x === 'object' ? x.label || x.id : x)),\n    can_email: typeof cf.can_email_1 === 'object' ? cf.can_email_1.label : cf.can_email_1,\n    role: typeof cf.role === 'object' && Array.isArray(cf.role) ? cf.role.map(r => r.label).join(', ') : cf.role\n  };\n});\nreturn JSON.stringify(results);"
+        }
+      },
+      {
+        "id": "node-update",
+        "name": "update_contact",
+        "type": "@n8n/n8n-nodes-langchain.toolCode",
+        "typeVersion": 1.1,
+        "position": [
+          880,
+          460
+        ],
+        "parameters": {
+          "name": "update_contact",
+          "description": "Update an existing contact in Relaticle CRM. Requires contact ID, and updated fields.",
+          "specifyInputSchema": true,
+          "schemaType": "manual",
+          "inputSchema": "{\"type\": \"object\", \"properties\": {\"id\": {\"type\": \"string\", \"description\": \"The exact ID of the contact returned by search_contacts\"}, \"name\": {\"type\": \"string\", \"description\": \"Updated name\"}, \"phone_number\": {\"type\": \"string\", \"description\": \"Updated phone number\"}, \"can_email\": {\"type\": \"string\", \"description\": \"'True' or 'False' to toggle email permissions\"}}, \"required\": [\"id\"]}",
+          "jsCode": "\nconst requestCrm = async (endpoint, method = 'GET', body = null) => {\n  const http = require('http');\n  return new Promise((resolve, reject) => {\n    const headers = {\n      'Authorization': 'Bearer 2|JzLpq8SvB7EsRRks5NzFZwwtZTubJ2jEMD3RTklP57b33a88',\n      'Accept': 'application/json'\n    };\n    if (body) {\n      headers['Content-Type'] = 'application/json';\n    }\n    const req = http.request({\n      hostname: '192.168.1.240',\n      port: 8085,\n      path: endpoint,\n      method: method,\n      headers: headers\n    }, (res) => {\n      let data = '';\n      res.on('data', chunk => data += chunk);\n      res.on('end', () => {\n        try {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: JSON.parse(data)\n          });\n        } catch (e) {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: data\n          });\n        }\n      });\n    });\n    req.on('error', reject);\n    if (body) {\n      req.write(typeof body === 'string' ? body : JSON.stringify(body));\n    }\n    req.end();\n  });\n};\n\nlet rawInput = {};\ntry { rawInput = query; } catch (e) { try { rawInput = input; } catch (e2) { rawInput = {}; } }\n\nlet params = {};\nif (typeof rawInput === 'string') {\n  try {\n    params = JSON.parse(rawInput);\n  } catch (e) {\n    params = { id: rawInput };\n  }\n} else if (rawInput && typeof rawInput === 'object') {\n  params = rawInput;\n}\n\nconst contactId = params.id || params.contact_id;\nif (!contactId) {\n  return JSON.stringify({ error: \"Missing contact ID. Search for the contact first to get their ID.\" });\n}\n\nfunction normalizePhone(num) {\n  if (!num) return num;\n  let digits = String(num).replace(/[^0-9+]/g, '');\n  if (digits.startsWith('+')) return digits;\n  if (digits.length === 10) return '+1' + digits;\n  if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;\n  return '+' + digits;\n}\n\nconst payload = {};\nif (params.name) payload.name = params.name;\n\nconst cf = {};\nif (params.phone_number !== undefined) {\n  const pList = Array.isArray(params.phone_number) ? params.phone_number : [params.phone_number];\n  cf.phone_number = pList.map(normalizePhone);\n}\nif (params.can_email !== undefined) {\n  const val = String(params.can_email).toLowerCase();\n  cf.can_email_1 = (val === 'true' || val === '1' || val === 'yes') \n    ? '01m3jtcb8cjxxkbb0hxyfnn5sd' \n    : '01m3jtcb8gbayp46bznx5bn2cp';\n}\nif (Object.keys(cf).length > 0) {\n  payload.custom_fields = cf;\n}\n\nconst res = await requestCrm('/api/v1/people/' + contactId, 'PUT', payload);\nif (!res.ok) {\n  return JSON.stringify({ error: res.data?.message || 'Update failed', details: res.data?.errors });\n}\nreturn JSON.stringify({ success: true, updated_id: contactId, data: res.data?.data });"
+        }
+      },
+      {
+        "id": "node-create",
+        "name": "create_contact",
+        "type": "@n8n/n8n-nodes-langchain.toolCode",
+        "typeVersion": 1.1,
+        "position": [
+          1020,
+          460
+        ],
+        "parameters": {
+          "name": "create_contact",
+          "description": "Create a new contact in Relaticle CRM.",
+          "specifyInputSchema": true,
+          "schemaType": "manual",
+          "inputSchema": "{\"type\": \"object\", \"properties\": {\"name\": {\"type\": \"string\", \"description\": \"Full name of the new contact\"}, \"phone_number\": {\"type\": \"string\", \"description\": \"Phone number\"}, \"can_email\": {\"type\": \"string\", \"description\": \"'True' or 'False'\"}}, \"required\": [\"name\"]}",
+          "jsCode": "\nconst requestCrm = async (endpoint, method = 'GET', body = null) => {\n  const http = require('http');\n  return new Promise((resolve, reject) => {\n    const headers = {\n      'Authorization': 'Bearer 2|JzLpq8SvB7EsRRks5NzFZwwtZTubJ2jEMD3RTklP57b33a88',\n      'Accept': 'application/json'\n    };\n    if (body) {\n      headers['Content-Type'] = 'application/json';\n    }\n    const req = http.request({\n      hostname: '192.168.1.240',\n      port: 8085,\n      path: endpoint,\n      method: method,\n      headers: headers\n    }, (res) => {\n      let data = '';\n      res.on('data', chunk => data += chunk);\n      res.on('end', () => {\n        try {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: JSON.parse(data)\n          });\n        } catch (e) {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: data\n          });\n        }\n      });\n    });\n    req.on('error', reject);\n    if (body) {\n      req.write(typeof body === 'string' ? body : JSON.stringify(body));\n    }\n    req.end();\n  });\n};\n\nlet rawInput = {};\ntry { rawInput = query; } catch (e) { try { rawInput = input; } catch (e2) { rawInput = {}; } }\n\nlet params = {};\nif (typeof rawInput === 'string') {\n  try {\n    params = JSON.parse(rawInput);\n  } catch (e) {\n    params = { name: rawInput };\n  }\n} else if (rawInput && typeof rawInput === 'object') {\n  params = rawInput;\n}\n\nfunction normalizePhone(num) {\n  if (!num) return num;\n  let digits = String(num).replace(/[^0-9+]/g, '');\n  if (digits.startsWith('+')) return digits;\n  if (digits.length === 10) return '+1' + digits;\n  if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;\n  return '+' + digits;\n}\n\nconst payload = {\n  name: params.name || 'New Contact',\n  custom_fields: {}\n};\n\nif (params.phone_number !== undefined) {\n  const pList = Array.isArray(params.phone_number) ? params.phone_number : [params.phone_number];\n  payload.custom_fields.phone_number = pList.map(normalizePhone);\n}\nif (params.can_email !== undefined) {\n  const val = String(params.can_email).toLowerCase();\n  payload.custom_fields.can_email_1 = (val === 'true' || val === '1' || val === 'yes') \n    ? '01m3jtcb8cjxxkbb0hxyfnn5sd' \n    : '01m3jtcb8gbayp46bznx5bn2cp';\n}\n\nconst res = await requestCrm('/api/v1/people', 'POST', payload);\nif (!res.ok) {\n  return JSON.stringify({ error: res.data?.message || 'Create failed', details: res.data?.errors });\n}\nreturn JSON.stringify({ success: true, id: res.data?.data?.id, name: res.data?.data?.attributes?.name });"
+        }
+      }
+    ],
+    "connections": {
+      "When chat message received": {
+        "main": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ollama Chat Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Window Buffer Memory": {
+        "ai_memory": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_memory",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "search_contacts": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "update_contact": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "create_contact": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": null,
+    "meta": null,
+    "nodeGroups": [],
+    "pinData": null,
+    "versionId": "5d563759-4106-416b-bf2b-aa72bcf09d16",
+    "activeVersionId": "5d563759-4106-416b-bf2b-aa72bcf09d16",
+    "versionCounter": 10,
+    "triggerCount": 1,
+    "sourceWorkflowId": null,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-10-06T22:08:03.333Z",
+        "createdAt": "2026-10-06T22:08:03.333Z",
+        "role": "workflow:owner",
+        "workflowId": "crmRelaticleAssistant",
+        "projectId": "dsceMxUAlkx7KphM",
+        "project": {
+          "updatedAt": "2026-08-12T20:46:07.936Z",
+          "createdAt": "2026-08-12T20:45:17.318Z",
+          "id": "dsceMxUAlkx7KphM",
+          "name": "Lokesh Chanana <lokeshchanana@gmail.com>",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "customTelemetryTags": [],
+          "creatorId": "215739ab-bfbe-4533-946b-97b532f84a44"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": null,
+      "description": null
+    }
+  }
+]

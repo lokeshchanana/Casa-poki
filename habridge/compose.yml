@@ -1,0 +1,17 @@
+version: '2.1'
+services:
+  habridge:
+    image: lscr.io/linuxserver/habridge:latest
+    container_name: habridge
+    ports:
+      - "9123:8080"
+    environment:
+      - PUID=1000 # Your User ID
+      - PGID=1000 # Your Group ID
+      - TZ=Etc/UTC # Replace with your specific timezone, e.g., America/Los_Angeles
+      - SEC_KEY= # Optional security key
+    volumes:
+      - /tank/habridge/config:/config # Host path for configuration files
+        #network_mode: "host" # Use the host's network stack for proper discovery
+    restart: unless-stopped
+

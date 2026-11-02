@@ -1,0 +1,28 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: n8n
+    restart: always
+    ports:
+      - "5678:5678"
+    env_file:
+      - .env
+    environment:
+      - NODE_FUNCTION_ALLOW_BUILTIN=*
+      - NODE_FUNCTION_ALLOW_EXTERNAL=*
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_SECURE_COOKIE=false
+      - NODE_ENV=production
+      - WEBHOOK_URL=https://n8n.lokeshchanana.com/
+      - N8N_WEBHOOK_URL=https://n8n.lokeshchanana.com/
+      - N8N_EDITOR_BASE_URL=https://n8n.lokeshchanana.com/
+      - GENERIC_TIMEZONE=America/Los_Angeles
+      - TZ=America/Los_Angeles
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GOOGLE_PALM_API_KEY=${GEMINI_API_KEY}
+      - N8N_MCP_ACCESS_ENABLED=true
+      - N8N_MCP_MANAGED_BY_ENV=true
+    volumes:
+      - /tank/n8n:/home/node/.n8n

@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  ollama-intel:
+    image: visitsb/ollama-ipex:latest
+    container_name: ollama-intel
+    privileged: true
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_VULKAN=1      
+      - OLLAMA_FLASH_ATTENTION=1 
+      - OLLAMA_NUM_PARALLEL=1
+      - SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS=1
+      - SYCL_CACHE_PERSISTENT=1
+    volumes:
+      - /tank/ollama/model:/root/.ollama  
+    ports:
+      - "11434:11434"
+    entrypoint: /bin/sh
+    command: 
+      - -c
+      - |
+        ollama serve & 
+        sleep 15
+        ollama pull qwen2.5:1.5b
+        wait
+    restart: always
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: always
+    ports:
+      - "8420:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama-intel:11434
+    volumes:
+      - /tank/ollama/chat:/app/backend/data  
+    depends_on:
+      - ollama-intel
+
+  crewai-app:
+    build: .
+    container_name: crewai-app
+    depends_on:
+      - ollama-intel
+    environment:
+      - OLLAMA_BASE_URL=http://ollama-intel:11434 
+    #volumes:
+    #  - /tank/ollama/crew-app:/app
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: n8n
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=America/Los_Angeles
+      - TZ=America/Los_Angeles
+    volumes:
+      - /tank/ollama/n8n_data:/home/node/.n8n
+    depends_on:
+      - ollama-intel
+
+volumes:
+  n8n_data:

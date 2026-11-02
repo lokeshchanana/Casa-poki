@@ -1,0 +1,24 @@
+services:
+  real-estate:
+    build: .
+    image: real-estate-prod:latest
+    container_name: real-estate
+    restart: always
+    ports:
+      - "8088:80"
+    volumes:
+      - ./public/instagram_reels.json:/usr/share/nginx/html/instagram_reels.json:ro
+      - ./public/loki.vcf:/usr/share/nginx/html/loki.vcf:ro
+      - ./public/Lokesh_Chanana.vcf:/usr/share/nginx/html/Lokesh_Chanana.vcf:ro
+
+  real-estate-dev:
+    build: .
+    image: real-estate-dev:latest
+    container_name: real-estate-dev
+    restart: always
+    ports:
+      - "8089:80"
+    volumes:
+      - ./public/instagram_reels.json:/usr/share/nginx/html/instagram_reels.json:ro
+      - ./public/loki.vcf:/usr/share/nginx/html/loki.vcf:ro
+      - ./public/Lokesh_Chanana.vcf:/usr/share/nginx/html/Lokesh_Chanana.vcf:ro

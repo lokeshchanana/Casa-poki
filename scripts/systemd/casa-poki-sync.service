@@ -1,0 +1,12 @@
+[Unit]
+Description=Casa-poki ZFS Tank Replication to NFS Server (192.168.1.250)
+After=network-online.target zfs.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/casa-poki-sync.sh
+TimeoutSec=7200
+StandardOutput=journal
+StandardError=journal

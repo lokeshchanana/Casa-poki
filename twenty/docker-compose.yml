@@ -1,0 +1,85 @@
+name: twenty
+
+services:
+  server:
+    image: twentycrm/twenty:${TAG:-latest}
+    container_name: twenty-server
+    volumes:
+      - /tank/twenty/data:/app/packages/twenty-server/.local-storage
+    ports:
+      - "8085:3000"
+    environment:
+      NODE_PORT: 3000
+      PG_DATABASE_URL: postgres://${PG_DATABASE_USER:-postgres}:${PG_DATABASE_PASSWORD}@${PG_DATABASE_HOST:-db}:${PG_DATABASE_PORT:-5432}/${PG_DATABASE_NAME:-default}
+      SERVER_URL: ${SERVER_URL}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      REDIS_CACHE_PREFIX: ${REDIS_CACHE_PREFIX:-}
+      DISABLE_DB_MIGRATIONS: "false"
+      DISABLE_CRON_JOBS_REGISTRATION: "false"
+      STORAGE_TYPE: ${STORAGE_TYPE}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      APP_SECRET: ${APP_SECRET}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: curl --fail http://localhost:3000/healthz
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    restart: always
+
+  worker:
+    image: twentycrm/twenty:${TAG:-latest}
+    container_name: twenty-worker
+    volumes:
+      - /tank/twenty/data:/app/packages/twenty-server/.local-storage
+    command: ["yarn", "worker:prod"]
+    environment:
+      PG_DATABASE_URL: postgres://${PG_DATABASE_USER:-postgres}:${PG_DATABASE_PASSWORD}@${PG_DATABASE_HOST:-db}:${PG_DATABASE_PORT:-5432}/${PG_DATABASE_NAME:-default}
+      SERVER_URL: ${SERVER_URL}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      REDIS_CACHE_PREFIX: ${REDIS_CACHE_PREFIX:-}
+      DISABLE_DB_MIGRATIONS: "true"
+      DISABLE_CRON_JOBS_REGISTRATION: "true"
+      STORAGE_TYPE: ${STORAGE_TYPE}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      APP_SECRET: ${APP_SECRET}
+    depends_on:
+      db:
+        condition: service_healthy
+      server:
+        condition: service_healthy
+    restart: always
+
+  db:
+    image: postgres:16-alpine
+    container_name: twenty-postgres
+    volumes:
+      - /tank/twenty/db:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${PG_DATABASE_NAME:-default}
+      POSTGRES_PASSWORD: ${PG_DATABASE_PASSWORD}
+      POSTGRES_USER: ${PG_DATABASE_USER:-postgres}
+    healthcheck:
+      test: pg_isready -U ${PG_DATABASE_USER:-postgres} -h localhost -d ${PG_DATABASE_NAME:-default}
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    container_name: twenty-redis
+    volumes:
+      - /tank/twenty/redis:/data
+    restart: always
+    command: ["--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

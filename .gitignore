@@ -1,0 +1,65 @@
+# -------------------------------------------------------------
+# Secrets and Credentials (NEVER COMMIT)
+# -------------------------------------------------------------
+**/.env
+**/.env.*
+!**/.env.example
+**/vars.txt
+*.key
+*.pem
+*.id_rsa
+*.id_ed25519
+*.secret
+*.token
+tokens.json
+credentials.json
+cloudflare.ini
+
+# -------------------------------------------------------------
+# Dependencies and Environments
+# -------------------------------------------------------------
+**/node_modules/
+**/.venv/
+**/venv/
+**/env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# -------------------------------------------------------------
+# Build Outputs and Caches
+# -------------------------------------------------------------
+**/dist/
+**/build/
+.cache/
+.parcel-cache/
+.turbo/
+
+# -------------------------------------------------------------
+# Runtime Data, Logs, and Local Databases
+# -------------------------------------------------------------
+*.log
+*.log.*
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+agents/data/*.db
+agents/backlog/
+
+# -------------------------------------------------------------
+# Editor and OS Artifacts
+# -------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+*.bak
+*.old
+.idea/
+.vscode/
+!.vscode/settings.json

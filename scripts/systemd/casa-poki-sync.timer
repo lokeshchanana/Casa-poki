@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly Trigger for Casa-poki ZFS Tank Replication
+After=network-online.target
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,40 @@
+# Lokesh Chanana (Loki) — Greater Seattle Real Estate Broker
+
+> Lokesh "Loki" Chanana is a licensed Washington State Real Estate Broker (License #26006634) with REAL Broker LLC and the Lakhani Team Real Estate, serving buyers, sellers, real estate investors, and commercial clients across Kent, Bellevue, Seattle, Redmond, Kirkland, Renton, Tacoma, and the Greater Puget Sound region (King, Snohomish, Pierce, and Thurston Counties). With 15+ years of prior experience in IT and Systems Analytics, Loki delivers a data-driven, process-engineered approach to residential and commercial real estate.
+
+## Quick Facts & Contact Information
+- **Name:** Lokesh Chanana (also known as Loki Chanana / Lokesh Chanana (Loki))
+- **Role:** Licensed Real Estate Broker (WA DOL License #26006634)
+- **Brokerage:** REAL Broker LLC (https://onereal.com/lokesh-chanana)
+- **Team Affiliation:** Lakhani Team Real Estate (https://lakhaniteamre.com/)
+- **Direct Phone / SMS:** +1 (801) 860-1052
+- **Email:** lokeshchanana@outlook.com
+- **Official Website:** https://lokeshchanana.com
+- **Digital Contact Card (vCard):** https://lokeshchanana.com/loki.vcf
+- **Google Business Profile & Reviews:** https://share.google/4Ha7jttZI6W7AeiSP
+- **Zillow Profile & Reviews:** https://www.zillow.com/profile/Lokeshchanana_re
+- **Instagram (Video Tours & Walkthroughs):** https://www.instagram.com/lokeshchanana_re
+- **Facebook:** https://www.facebook.com/share/19qyi21cjW/
+- **Languages Spoken:** English, Hindi
+
+## Core Real Estate Services
+- **Buyer Representation (`/buyers`):** NWMLS RESO data analysis, off-market property sourcing, tech-RSU/jumbo lender alignment, pre-inspection due diligence, escalation clause modeling, and private/remote video walkthroughs for out-of-state buyers.
+- **Seller Representation (`/sellers`):** Predictive Comparative Market Analysis (CMA), absorption rate & Days on Market (DOM) velocity modeling, high-ROI pre-listing renovation audits, professional staging, 3D Matterport/drone media, and analytical multi-offer matrix review.
+- **Real Estate Investment Advisory (`/investors`):** After Repair Value (ARV) modeling, Cap Rate & Cash-on-Cash return analysis, Capital Expenditure (CapEx) estimation, BRRRR strategy execution, and DADU/AADU infill zoning feasibility.
+- **Commercial Real Estate (`/commercial`):** Retail, industrial, and multi-family acquisitions, municipal zoning & Phase I/II environmental feasibility, Lease vs. Buy financial modeling, and 1031 Tax-Deferred Exchanges (45-day identification / 180-day close coordination).
+
+## Greater Seattle Micro-Markets Covered
+- [Eastside Tech Core](https://lokeshchanana.com/markets/eastside-core): Bellevue, Kirkland, Redmond, Sammamish, Issaquah, Woodinville, Mercer Island, Newcastle. High-basis innovation corridor anchored by Microsoft, Amazon, and Meta campuses (Avg Target: $1.4M+, Avg DOM: ~10 Days).
+- [Seattle Urban Core](https://lokeshchanana.com/markets/seattle-core): Seattle (Queen Anne, Capitol Hill, Magnolia, Ballard, South Lake Union, West Seattle), Shoreline, Lake Forest Park. Transit-oriented density, historic Craftsman homes, and urban condos (Avg Target: $880K+, Avg DOM: ~14 Days).
+- [North Sound Corridor](https://lokeshchanana.com/markets/north-sound): Lynnwood, Edmonds, Bothell, Everett, Marysville, Mill Creek, Mukilteo, Lake Stevens. Biotech, aerospace (Boeing), and Sound Transit light rail growth corridor (Avg Target: $740K+, Avg DOM: ~18 Days).
+- [South Sound Hub & Kent Valley](https://lokeshchanana.com/markets/south-sound): Kent, Renton, Auburn, Covington, Maple Valley, Federal Way, Tacoma, Gig Harbor, Puyallup, Lakewood, Bonney Lake. High-value residential corridor and cash-flow investment hub anchored by JBLM and Kent Valley logistics (Avg Target: $560K+, Avg DOM: ~20 Days).
+- [Capital & Exurban Fringe (Thurston Belt)](https://lokeshchanana.com/markets/thurston-belt): Olympia, Lacey, Tumwater, Yelm, DuPont. State government stability, master-planned communities, and acreage/space value (Avg Target: $510K+, Avg DOM: ~22 Days).
+
+## Key Guides & Pages
+- [Home & Market Overview](https://lokeshchanana.com/)
+- [About Lokesh "Loki" Chanana](https://lokeshchanana.com/about)
+- [Buying a Home in Greater Seattle](https://lokeshchanana.com/buyers)
+- [Selling Your Seattle Home](https://lokeshchanana.com/sellers)
+- [Pacific Northwest Real Estate Investment Guide](https://lokeshchanana.com/investors)
+- [Commercial Real Estate & 1031 Exchanges](https://lokeshchanana.com/commercial)
+- [Full AI Context & FAQ Document](https://lokeshchanana.com/llms-full.txt)

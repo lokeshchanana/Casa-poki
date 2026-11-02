@@ -1,0 +1,102 @@
+services:
+  app:
+    image: ghcr.io/relaticle/relaticle:latest
+    container_name: crm-app
+    restart: unless-stopped
+    ports:
+      - "8085:8080"
+    env_file:
+      - .env
+    volumes:
+      - /tank/relaticle/storage:/var/www/html/storage/app
+      - /tank/relaticle/storage/oauth-private.key:/var/www/html/storage/oauth-private.key:ro
+      - /tank/relaticle/storage/oauth-public.key:/var/www/html/storage/oauth-public.key:ro
+      - ./overrides/login_options.blade.php:/var/www/html/resources/views/filament/auth/login_options.blade.php:ro
+      - ./overrides/Login.php:/var/www/html/app/Filament/Pages/Auth/Login.php:ro
+    networks:
+      - relaticle-internal
+      - postgres-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/up"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  horizon:
+    image: ghcr.io/relaticle/relaticle:latest
+    container_name: crm-horizon
+    restart: unless-stopped
+    command: ["php", "/var/www/html/artisan", "horizon"]
+    stop_signal: SIGTERM
+    env_file:
+      - .env
+    environment:
+      AUTORUN_ENABLED: "false"
+    volumes:
+      - /tank/relaticle/storage:/var/www/html/storage/app
+      - /tank/relaticle/storage/oauth-private.key:/var/www/html/storage/oauth-private.key:ro
+      - /tank/relaticle/storage/oauth-public.key:/var/www/html/storage/oauth-public.key:ro
+    networks:
+      - relaticle-internal
+      - postgres-network
+    depends_on:
+      app:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "healthcheck-horizon"]
+      start_period: 10s
+
+  scheduler:
+    image: ghcr.io/relaticle/relaticle:latest
+    container_name: crm-scheduler
+    restart: unless-stopped
+    command: ["php", "/var/www/html/artisan", "schedule:work"]
+    stop_signal: SIGTERM
+    env_file:
+      - .env
+    environment:
+      AUTORUN_ENABLED: "false"
+    volumes:
+      - /tank/relaticle/storage:/var/www/html/storage/app
+      - /tank/relaticle/storage/oauth-private.key:/var/www/html/storage/oauth-private.key:ro
+      - /tank/relaticle/storage/oauth-public.key:/var/www/html/storage/oauth-public.key:ro
+    networks:
+      - relaticle-internal
+      - postgres-network
+    depends_on:
+      app:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "healthcheck-schedule"]
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: crm-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - /tank/relaticle/redis:/data
+    networks:
+      relaticle-internal:
+        aliases:
+          - redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  relaticle-internal:
+    name: relaticle-internal
+  postgres-network:
+    external: true

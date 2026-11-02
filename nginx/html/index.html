@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Casa-Poki Server Dashboard</title>
+    <style>
+        :root {
+            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --card-border: rgba(255, 255, 255, 0.1);
+            --card-hover: rgba(51, 65, 85, 0.9);
+            --text-main: #f8fafc;
+            --text-sub: #94a3b8;
+            --accent: #6366f1;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        }
+
+        body {
+            background: var(--bg-gradient);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 3rem 1.5rem;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+            background: linear-gradient(to right, #818cf8, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            color: var(--text-sub);
+            font-size: 1.1rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            width: 100%;
+            max-width: 1100px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 1.75rem;
+            text-decoration: none;
+            color: inherit;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .card:hover {
+            transform: translateY(-5deg);
+            background: var(--card-hover);
+            border-color: rgba(99, 102, 241, 0.4);
+            box-shadow: 0 12px 30px rgba(99, 102, 241, 0.2);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .card-icon {
+            font-size: 2.2rem;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+        }
+
+        .card-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+        }
+
+        .card-desc {
+            color: var(--text-sub);
+            font-size: 0.95rem;
+            line-height: 1.5;
+            margin-bottom: 1.25rem;
+        }
+
+        .card-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            color: #818cf8;
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+
+        .footer {
+            margin-top: auto;
+            padding-top: 3rem;
+            color: var(--text-sub);
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>🏡 Casa-Poki Home Server</h1>
+        <p>Central Access Hub & Local Services</p>
+    </div>
+
+    <div class="grid">
+        <!-- Home Assistant -->
+        <a href="https://ha.lokeshchanana.com" class="card">
+            <div>
+                <div class="card-header">
+                    <div class="card-icon">🏠</div>
+                    <div class="card-title">Home Assistant</div>
+                </div>
+                <div class="card-desc">Smart Home Automation & Control Panel</div>
+            </div>
+            <div class="card-footer">
+                <span>ha.lokeshchanana.com</span>
+                <span>→</span>
+            </div>
+        </a>
+
+        <!-- Immich -->
+        <a href="https://immich.lokeshchanana.com" class="card">
+            <div>
+                <div class="card-header">
+                    <div class="card-icon">🖼️</div>
+                    <div class="card-title">Immich</div>
+                </div>
+                <div class="card-desc">Self-Hosted Photo & Video Backup</div>
+            </div>
+            <div class="card-footer">
+                <span>immich.lokeshchanana.com</span>
+                <span>→</span>
+            </div>
+        </a>
+
+        <!-- n8n -->
+        <a href="https://n8n.lokeshchanana.com" class="card">
+            <div>
+                <div class="card-header">
+                    <div class="card-icon">⚡</div>
+                    <div class="card-title">n8n Automation</div>
+                </div>
+                <div class="card-desc">Workflow Automation & AI Integrations</div>
+            </div>
+            <div class="card-footer">
+                <span>n8n.lokeshchanana.com</span>
+                <span>→</span>
+            </div>
+        </a>
+
+        <!-- GOP -->
+        <a href="https://gop.lokeshchanana.com" class="card">
+            <div>
+                <div class="card-header">
+                    <div class="card-icon">📊</div>
+                    <div class="card-title">GOP App</div>
+                </div>
+                <div class="card-desc">GOP Web Application</div>
+            </div>
+            <div class="card-footer">
+                <span>gop.lokeshchanana.com</span>
+                <span>→</span>
+            </div>
+        </a>
+
+        <!-- Ads / AdGuard -->
+        <a href="https://ads.lokeshchanana.com" class="card">
+            <div>
+                <div class="card-header">
+                    <div class="card-icon">🛡️</div>
+                    <div class="card-title">AdGuard / Ads</div>
+                </div>
+                <div class="card-desc">Network-wide Ad Blocker & DNS Security</div>
+            </div>
+            <div class="card-footer">
+                <span>ads.lokeshchanana.com</span>
+                <span>→</span>
+            </div>
+        </a>
+    </div>
+
+    <div class="footer">
+        Casa-Poki Server • Secured with HTTPS SSL
+    </div>
+
+</body>
+</html>

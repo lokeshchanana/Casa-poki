@@ -1,0 +1,444 @@
+[
+  {
+    "updatedAt": "2026-10-06T23:19:58.000Z",
+    "createdAt": "2026-10-06T22:08:03.329Z",
+    "id": "crmRelaticleAssistant",
+    "name": "Relaticle CRM Assistant",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+      {
+        "id": "node-chat",
+        "name": "When chat message received",
+        "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+        "typeVersion": 1.4,
+        "position": [
+          380,
+          240
+        ],
+        "webhookId": "relaticle-crm-chat",
+        "parameters": {
+          "public": true,
+          "mode": "hostedChat",
+          "initialMessages": "Hello! I am your Relaticle CRM assistant. How can I help you today? (e.g. search contacts, update phone numbers, toggle email permissions, create contacts)",
+          "options": {
+            "title": "Relaticle CRM AI Assistant",
+            "subtitle": "Powered by local Ollama on casa-poki",
+            "inputPlaceholder": "Type a message or instruction...",
+            "responseMode": "streaming"
+          },
+          "availableInChat": true,
+          "agentName": "Relaticle CRM Assistant",
+          "agentDescription": "Search contacts, update phone numbers, toggle email permissions, and create contacts in Relaticle CRM.",
+          "agentIcon": {
+            "type": "icon",
+            "value": "bot"
+          },
+          "suggestedPrompts": {
+            "prompts": [
+              {
+                "text": "Search for Dave"
+              },
+              {
+                "text": "Update phone number for Dave to +16839856423"
+              },
+              {
+                "text": "Change can email for Steve to False"
+              },
+              {
+                "text": "Add a new contact"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "node-agent",
+        "name": "AI Agent",
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 2.2,
+        "position": [
+          600,
+          240
+        ],
+        "parameters": {
+          "promptType": "auto",
+          "options": {
+            "systemMessage": "You are an intelligent, accurate, and helpful assistant for Relaticle CRM running 100% locally.\nYou have 9 specialized tools to interact with every part of the CRM:\n1. `search_contacts`: Search contacts by name, or list contacts filtered by criteria (`role`, `can_email`: \"True\"/\"False\", `limit`).\n2. `create_contact`: Add a brand new contact (name, phone, email, role, can_email, company_id).\n3. `update_contact`: Update an existing contact's fields by their exact contact ID.\n4. `delete_contact`: Permanently delete a contact by their exact contact ID.\n5. `manage_companies`: Search/list, create, update, or delete companies.\n6. `manage_tasks`: List, create, update status (\"To do\", \"In progress\", \"Done\") or priority, or delete tasks.\n7. `manage_notes`: List, create (with title and body linked to a contact/company/opportunity), or delete notes.\n8. `manage_opportunities`: List, create, update pipeline stage or amount, or delete opportunities (deals).\n9. `manage_custom_fields`: List custom fields, create new custom fields on any entity (people, company, task, note, opportunity), or delete custom fields.\n\nSTRICT INSTRUCTIONS:\n- Finding & Modifying: Whenever the user asks to look up, view, update, or delete an existing contact, company, task, note, opportunity, or custom field, you MUST FIRST search/list to obtain the exact `id`.\n- Deletions: ALWAYS search first to confirm the record ID before calling delete tools (`delete_contact`, `manage_companies(delete)`, `manage_tasks(delete)`, `manage_notes(delete)`, `manage_opportunities(delete)`, `manage_custom_fields(delete)`).\n- Criteria Queries: When asked to list contacts matching criteria (e.g. \"who can be emailed\", \"find all buyers\", \"all high priority tasks\"), use the appropriate filters in the search/list tools.\n- Tool Arguments: Never output null for optional parameters; if a parameter is not provided or not needed, omit the key entirely.\n- Responses: Confirm every action with a clear, polite summary including record names, IDs, and modified fields."
+          }
+        }
+      },
+      {
+        "id": "node-ollama",
+        "name": "Ollama Chat Model",
+        "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+        "typeVersion": 1,
+        "position": [
+          480,
+          460
+        ],
+        "parameters": {
+          "model": "crm-qwen:3b",
+          "options": {
+            "temperature": 0.2
+          }
+        },
+        "credentials": {
+          "ollamaApi": {
+            "id": "ollamaLocalCreds",
+            "name": "Ollama account"
+          }
+        }
+      },
+      {
+        "id": "node-memory",
+        "name": "Window Buffer Memory",
+        "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+        "typeVersion": 1.3,
+        "position": [
+          600,
+          460
+        ],
+        "parameters": {
+          "sessionKey": "={{ $('When chat message received').first().json.sessionId || 'default' }}",
+          "contextWindowLength": 5,
+          "sessionIdType": "customKey"
+        }
+      },
+      {
+        "id": "node-tool-search-contacts",
+        "name": "search_contacts",
+        "type": "@n8n/n8n-nodes-langchain.toolCode",
+        "typeVersion": 1.1,
+        "position": [
+          920,
+          200
+        ],
+        "parameters": {
+          "name": "search_contacts",
+          "description": "Search or list contacts in Relaticle CRM with criteria (query text, role, can_email permission, limit).",
+          "specifyInputSchema": true,
+          "schemaType": "manual",
+          "inputSchema": "{\"type\": \"object\", \"properties\": {\"query\": {\"type\": \"string\", \"description\": \"Search keyword or name (optional)\"}, \"role\": {\"type\": \"string\", \"description\": \"Filter by role: Customer, Buyer, Seller, Real estate agent, Contractor, lender\"}, \"can_email\": {\"type\": \"string\", \"description\": \"'True' or 'False' to filter by email permission\"}, \"limit\": {\"type\": \"number\", \"description\": \"Max number of contacts to return (default 10)\"}}}",
+          "jsCode": "\nconst requestCrm = async (endpoint, method = 'GET', body = null) => {\n  const http = require('http');\n  return new Promise((resolve, reject) => {\n    const headers = {\n      'Authorization': 'Bearer 2|JzLpq8SvB7EsRRks5NzFZwwtZTubJ2jEMD3RTklP57b33a88',\n      'Accept': 'application/json'\n    };\n    if (body) {\n      headers['Content-Type'] = 'application/json';\n    }\n    const req = http.request({\n      hostname: '192.168.1.240',\n      port: 8085,\n      path: endpoint.replace(/\\[/g, '%5B').replace(/\\]/g, '%5D'),\n      method: method,\n      headers: headers\n    }, (res) => {\n      let data = '';\n      res.on('data', chunk => data += chunk);\n      res.on('end', () => {\n        try {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: JSON.parse(data)\n          });\n        } catch (e) {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: data\n          });\n        }\n      });\n    });\n    req.on('error', err => resolve({ ok: false, status: 500, data: { message: err.message } }));\n    if (body) {\n      req.write(typeof body === 'string' ? body : JSON.stringify(body));\n    }\n    req.end();\n  });\n};\n\nfunction normalizePhone(num) {\n  if (!num) return num;\n  let digits = String(num).replace(/[^0-9+]/g, '');\n  if (digits.startsWith('+')) return digits;\n  if (digits.length === 10) return '+1' + digits;\n  if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;\n  return '+' + digits;\n}\n\nlet rawInput = {};\ntry { rawInput = query; } catch (e) { try { rawInput = input; } catch (e2) { rawInput = {}; } }\nlet params = {};\nif (typeof rawInput === 'string') {\n  try { params = JSON.parse(rawInput); } catch (e) { params = { query: rawInput }; }\n} else if (rawInput && typeof rawInput === 'object') {\n  params = rawInput;\n}\n\nlet url = '/api/v1/people?per_page=50';\nif (params.query) {\n  url += '&filter[name]=' + encodeURIComponent(params.query);\n}\n\nconst res = await requestCrm(url);\nif (!res.ok) {\n  return JSON.stringify({ error: res.data?.message || 'Failed to search contacts' });\n}\n\nlet items = (res.data?.data || []).map(p => {\n  const cf = p.attributes?.custom_fields || {};\n  const phoneList = Array.isArray(cf.phone_number) ? cf.phone_number.map(x => x.label || x.id || x) : [];\n  const emailList = Array.isArray(cf.emails) ? cf.emails.map(x => x.label || x.id || x) : [];\n  const roleList = Array.isArray(cf.role) ? cf.role.map(x => x.label || x.name || x) : [];\n  return {\n    id: p.id,\n    name: p.attributes?.name,\n    company_id: p.attributes?.company_id,\n    phone: phoneList.join(', '),\n    email: emailList.join(', '),\n    role: roleList.join(', '),\n    can_email: cf.can_email_1?.label || (cf.can_email_1?.id === '01m3jtcb8cjxxkbb0hxyfnn5sd' ? 'True' : 'False')\n  };\n});\n\nif (params.can_email !== undefined) {\n  const wantEmail = String(params.can_email).toLowerCase();\n  const isTrue = (wantEmail === 'true' || wantEmail === '1' || wantEmail === 'yes');\n  items = items.filter(x => isTrue ? x.can_email === 'True' : x.can_email === 'False');\n}\n\nif (params.role) {\n  const roleTerm = String(params.role).toLowerCase();\n  items = items.filter(x => x.role.toLowerCase().includes(roleTerm));\n}\n\nconst limit = params.limit ? parseInt(params.limit, 10) : 10;\nitems = items.slice(0, limit);\n\nreturn JSON.stringify({\n  total_found: items.length,\n  contacts: items\n});\n"
+        }
+      },
+      {
+        "id": "node-tool-create-contact",
+        "name": "create_contact",
+        "type": "@n8n/n8n-nodes-langchain.toolCode",
+        "typeVersion": 1.1,
+        "position": [
+          920,
+          320
+        ],
+        "parameters": {
+          "name": "create_contact",
+          "description": "Create a new contact person in Relaticle CRM.",
+          "specifyInputSchema": true,
+          "schemaType": "manual",
+          "inputSchema": "{\"type\": \"object\", \"properties\": {\"name\": {\"type\": \"string\", \"description\": \"Full name of the contact\"}, \"phone_number\": {\"type\": [\"string\", \"null\"], \"description\": \"Phone number\"}, \"email\": {\"type\": [\"string\", \"null\"], \"description\": \"Email address\"}, \"role\": {\"type\": [\"string\", \"null\"], \"description\": \"Customer, Buyer, Seller, Real estate agent, Contractor, lender\"}, \"can_email\": {\"type\": [\"string\", \"null\"], \"description\": \"'True' or 'False' for email permissions\"}, \"company_id\": {\"type\": [\"string\", \"null\"], \"description\": \"Associated company ID (optional)\"}}, \"required\": [\"name\"]}",
+          "jsCode": "\nconst requestCrm = async (endpoint, method = 'GET', body = null) => {\n  const http = require('http');\n  return new Promise((resolve, reject) => {\n    const headers = {\n      'Authorization': 'Bearer 2|JzLpq8SvB7EsRRks5NzFZwwtZTubJ2jEMD3RTklP57b33a88',\n      'Accept': 'application/json'\n    };\n    if (body) {\n      headers['Content-Type'] = 'application/json';\n    }\n    const req = http.request({\n      hostname: '192.168.1.240',\n      port: 8085,\n      path: endpoint.replace(/\\[/g, '%5B').replace(/\\]/g, '%5D'),\n      method: method,\n      headers: headers\n    }, (res) => {\n      let data = '';\n      res.on('data', chunk => data += chunk);\n      res.on('end', () => {\n        try {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: JSON.parse(data)\n          });\n        } catch (e) {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: data\n          });\n        }\n      });\n    });\n    req.on('error', err => resolve({ ok: false, status: 500, data: { message: err.message } }));\n    if (body) {\n      req.write(typeof body === 'string' ? body : JSON.stringify(body));\n    }\n    req.end();\n  });\n};\n\nfunction normalizePhone(num) {\n  if (!num) return num;\n  let digits = String(num).replace(/[^0-9+]/g, '');\n  if (digits.startsWith('+')) return digits;\n  if (digits.length === 10) return '+1' + digits;\n  if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;\n  return '+' + digits;\n}\n\nlet rawInput = {};\ntry { rawInput = query; } catch (e) { try { rawInput = input; } catch (e2) { rawInput = {}; } }\nlet params = {};\nif (typeof rawInput === 'string') {\n  try { params = JSON.parse(rawInput); } catch (e) { params = { query: rawInput }; }\n} else if (rawInput && typeof rawInput === 'object') {\n  params = rawInput;\n}\n\nif (!params.name) {\n  return JSON.stringify({ error: \"Missing required contact name.\" });\n}\n\nconst payload = {\n  name: params.name,\n  custom_fields: {}\n};\nif (params.company_id) payload.company_id = params.company_id;\n\nif (params.phone_number) {\n  const pList = Array.isArray(params.phone_number) ? params.phone_number : [params.phone_number];\n  payload.custom_fields.phone_number = pList.map(normalizePhone);\n}\nif (params.email) {\n  const eList = Array.isArray(params.email) ? params.email : [params.email];\n  payload.custom_fields.emails = eList;\n}\nif (params.can_email !== undefined) {\n  const val = String(params.can_email).toLowerCase();\n  payload.custom_fields.can_email_1 = (val === 'true' || val === '1' || val === 'yes') \n    ? '01m3jtcb8cjxxkbb0hxyfnn5sd' \n    : '01m3jtcb8gbayp46bznx5bn2cp';\n}\nif (params.role) {\n  const roleMap = {\n    'customer': '01m3jqwz67vx47ebmxxv3cesf7',\n    'buyer': '01m3jqwz6bqrppht6ewyr8n21n',\n    'seller': '01m3jqwz6fvrh9kcsv8gaf87ky',\n    'real estate agent': '01m3jqwz6jz7k0e6cjym9cecaw',\n    'contractor': '01m3jqwz6n677qech621fpzxs9',\n    'lender': '01m3jqwz6s9p0gcz3hk5mn08nd'\n  };\n  const matched = roleMap[String(params.role).toLowerCase()];\n  if (matched) payload.custom_fields.role = [matched];\n}\n\nconst res = await requestCrm('/api/v1/people', 'POST', payload);\nif (!res.ok) {\n  return JSON.stringify({ error: res.data?.message || 'Create failed', details: res.data?.errors });\n}\nreturn JSON.stringify({\n  success: true,\n  id: res.data?.data?.id,\n  name: res.data?.data?.attributes?.name,\n  message: \"Contact created successfully.\"\n});\n"
+        }
+      },
+      {
+        "id": "node-tool-update-contact",
+        "name": "update_contact",
+        "type": "@n8n/n8n-nodes-langchain.toolCode",
+        "typeVersion": 1.1,
+        "position": [
+          920,
+          440
+        ],
+        "parameters": {
+          "name": "update_contact",
+          "description": "Update an existing contact in Relaticle CRM by their exact ID.",
+          "specifyInputSchema": true,
+          "schemaType": "manual",
+          "inputSchema": "{\"type\": \"object\", \"properties\": {\"id\": {\"type\": \"string\", \"description\": \"The exact ID of the contact from search_contacts\"}, \"name\": {\"type\": [\"string\", \"null\"], \"description\": \"Updated name\"}, \"phone_number\": {\"type\": [\"string\", \"null\"], \"description\": \"Updated phone number\"}, \"email\": {\"type\": [\"string\", \"null\"], \"description\": \"Updated email\"}, \"role\": {\"type\": [\"string\", \"null\"], \"description\": \"Customer, Buyer, Seller, Real estate agent, Contractor, lender\"}, \"can_email\": {\"type\": [\"string\", \"null\"], \"description\": \"'True' or 'False' to toggle email permissions\"}, \"company_id\": {\"type\": [\"string\", \"null\"], \"description\": \"Associated company ID\"}}, \"required\": [\"id\"]}",
+          "jsCode": "\nconst requestCrm = async (endpoint, method = 'GET', body = null) => {\n  const http = require('http');\n  return new Promise((resolve, reject) => {\n    const headers = {\n      'Authorization': 'Bearer 2|JzLpq8SvB7EsRRks5NzFZwwtZTubJ2jEMD3RTklP57b33a88',\n      'Accept': 'application/json'\n    };\n    if (body) {\n      headers['Content-Type'] = 'application/json';\n    }\n    const req = http.request({\n      hostname: '192.168.1.240',\n      port: 8085,\n      path: endpoint.replace(/\\[/g, '%5B').replace(/\\]/g, '%5D'),\n      method: method,\n      headers: headers\n    }, (res) => {\n      let data = '';\n      res.on('data', chunk => data += chunk);\n      res.on('end', () => {\n        try {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: JSON.parse(data)\n          });\n        } catch (e) {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: data\n          });\n        }\n      });\n    });\n    req.on('error', err => resolve({ ok: false, status: 500, data: { message: err.message } }));\n    if (body) {\n      req.write(typeof body === 'string' ? body : JSON.stringify(body));\n    }\n    req.end();\n  });\n};\n\nfunction normalizePhone(num) {\n  if (!num) return num;\n  let digits = String(num).replace(/[^0-9+]/g, '');\n  if (digits.startsWith('+')) return digits;\n  if (digits.length === 10) return '+1' + digits;\n  if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;\n  return '+' + digits;\n}\n\nlet rawInput = {};\ntry { rawInput = query; } catch (e) { try { rawInput = input; } catch (e2) { rawInput = {}; } }\nlet params = {};\nif (typeof rawInput === 'string') {\n  try { params = JSON.parse(rawInput); } catch (e) { params = { query: rawInput }; }\n} else if (rawInput && typeof rawInput === 'object') {\n  params = rawInput;\n}\n\nconst contactId = params.id || params.contact_id;\nif (!contactId) {\n  return JSON.stringify({ error: \"Missing contact ID. Search for the contact first to get their ID.\" });\n}\n\nconst payload = {};\nif (params.name) payload.name = params.name;\nif (params.company_id !== undefined) payload.company_id = params.company_id;\n\nconst cf = {};\nif (params.phone_number !== undefined) {\n  const pList = Array.isArray(params.phone_number) ? params.phone_number : [params.phone_number];\n  cf.phone_number = pList.map(normalizePhone);\n}\nif (params.email !== undefined) {\n  const eList = Array.isArray(params.email) ? params.email : [params.email];\n  cf.emails = eList;\n}\nif (params.can_email !== undefined) {\n  const val = String(params.can_email).toLowerCase();\n  cf.can_email_1 = (val === 'true' || val === '1' || val === 'yes') \n    ? '01m3jtcb8cjxxkbb0hxyfnn5sd' \n    : '01m3jtcb8gbayp46bznx5bn2cp';\n}\nif (params.role !== undefined) {\n  const roleMap = {\n    'customer': '01m3jqwz67vx47ebmxxv3cesf7',\n    'buyer': '01m3jqwz6bqrppht6ewyr8n21n',\n    'seller': '01m3jqwz6fvrh9kcsv8gaf87ky',\n    'real estate agent': '01m3jqwz6jz7k0e6cjym9cecaw',\n    'contractor': '01m3jqwz6n677qech621fpzxs9',\n    'lender': '01m3jqwz6s9p0gcz3hk5mn08nd'\n  };\n  const matched = roleMap[String(params.role).toLowerCase()];\n  if (matched) cf.role = [matched];\n}\nif (Object.keys(cf).length > 0) {\n  payload.custom_fields = cf;\n}\n\nconst res = await requestCrm('/api/v1/people/' + contactId, 'PUT', payload);\nif (!res.ok) {\n  return JSON.stringify({ error: res.data?.message || 'Update failed', details: res.data?.errors });\n}\nreturn JSON.stringify({\n  success: true,\n  updated_id: contactId,\n  name: res.data?.data?.attributes?.name,\n  message: \"Contact updated successfully.\"\n});\n"
+        }
+      },
+      {
+        "id": "node-tool-delete-contact",
+        "name": "delete_contact",
+        "type": "@n8n/n8n-nodes-langchain.toolCode",
+        "typeVersion": 1.1,
+        "position": [
+          920,
+          560
+        ],
+        "parameters": {
+          "name": "delete_contact",
+          "description": "Permanently delete a contact from Relaticle CRM by their exact ID.",
+          "specifyInputSchema": true,
+          "schemaType": "manual",
+          "inputSchema": "{\"type\": \"object\", \"properties\": {\"id\": {\"type\": [\"string\", \"null\"], \"description\": \"The exact contact ID to delete (optional if name is provided)\"}, \"name\": {\"type\": [\"string\", \"null\"], \"description\": \"The contact name to find and delete (optional alternative to id)\"}}}",
+          "jsCode": "\nconst requestCrm = async (endpoint, method = 'GET', body = null) => {\n  const http = require('http');\n  return new Promise((resolve, reject) => {\n    const headers = {\n      'Authorization': 'Bearer 2|JzLpq8SvB7EsRRks5NzFZwwtZTubJ2jEMD3RTklP57b33a88',\n      'Accept': 'application/json'\n    };\n    if (body) {\n      headers['Content-Type'] = 'application/json';\n    }\n    const req = http.request({\n      hostname: '192.168.1.240',\n      port: 8085,\n      path: endpoint.replace(/\\[/g, '%5B').replace(/\\]/g, '%5D'),\n      method: method,\n      headers: headers\n    }, (res) => {\n      let data = '';\n      res.on('data', chunk => data += chunk);\n      res.on('end', () => {\n        try {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: JSON.parse(data)\n          });\n        } catch (e) {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: data\n          });\n        }\n      });\n    });\n    req.on('error', err => resolve({ ok: false, status: 500, data: { message: err.message } }));\n    if (body) {\n      req.write(typeof body === 'string' ? body : JSON.stringify(body));\n    }\n    req.end();\n  });\n};\n\nfunction normalizePhone(num) {\n  if (!num) return num;\n  let digits = String(num).replace(/[^0-9+]/g, '');\n  if (digits.startsWith('+')) return digits;\n  if (digits.length === 10) return '+1' + digits;\n  if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;\n  return '+' + digits;\n}\n\nlet rawInput = {};\ntry { rawInput = query; } catch (e) { try { rawInput = input; } catch (e2) { rawInput = {}; } }\nlet params = {};\nif (typeof rawInput === 'string') {\n  try { params = JSON.parse(rawInput); } catch (e) { params = { query: rawInput }; }\n} else if (rawInput && typeof rawInput === 'object') {\n  params = rawInput;\n}\n\nlet contactId = params.id || params.contact_id;\nif (!contactId && params.name) {\n  const searchRes = await requestCrm('/api/v1/people?filter[name]=' + encodeURIComponent(params.name));\n  const found = searchRes.data?.data || [];\n  if (found.length === 0) return JSON.stringify({ error: `No contact found matching name '${params.name}'.` });\n  contactId = found[0].id;\n}\nif (!contactId) {\n  return JSON.stringify({ error: \"Missing contact ID or name to delete.\" });\n}\n\nconst res = await requestCrm('/api/v1/people/' + contactId, 'DELETE');\nif (!res.ok && res.status !== 204) {\n  return JSON.stringify({ error: res.data?.message || 'Failed to delete contact' });\n}\nreturn JSON.stringify({\n  success: true,\n  deleted_id: contactId,\n  message: \"Contact deleted successfully from Relaticle CRM.\"\n});\n"
+        }
+      },
+      {
+        "id": "node-tool-manage-companies",
+        "name": "manage_companies",
+        "type": "@n8n/n8n-nodes-langchain.toolCode",
+        "typeVersion": 1.1,
+        "position": [
+          1120,
+          200
+        ],
+        "parameters": {
+          "name": "manage_companies",
+          "description": "Manage companies in Relaticle CRM (action: 'search', 'create', 'update', 'delete').",
+          "specifyInputSchema": true,
+          "schemaType": "manual",
+          "inputSchema": "{\"type\": \"object\", \"properties\": {\"action\": {\"type\": \"string\", \"enum\": [\"search\", \"create\", \"update\", \"delete\"], \"description\": \"Action to perform\"}, \"id\": {\"type\": [\"string\", \"null\"], \"description\": \"Company ID (required for update/delete)\"}, \"name\": {\"type\": [\"string\", \"null\"], \"description\": \"Company name (required for create, or search query)\"}, \"phone_number\": {\"type\": [\"string\", \"null\"], \"description\": \"Company phone number\"}, \"email\": {\"type\": [\"string\", \"null\"], \"description\": \"Company email address\"}, \"poc\": {\"type\": [\"string\", \"null\"], \"description\": \"Point of Contact name\"}, \"domain\": {\"type\": [\"string\", \"null\"], \"description\": \"Company website / domain\"}, \"business\": {\"type\": [\"string\", \"null\"], \"description\": \"Business industry / category\"}}, \"required\": [\"action\"]}",
+          "jsCode": "\nconst requestCrm = async (endpoint, method = 'GET', body = null) => {\n  const http = require('http');\n  return new Promise((resolve, reject) => {\n    const headers = {\n      'Authorization': 'Bearer 2|JzLpq8SvB7EsRRks5NzFZwwtZTubJ2jEMD3RTklP57b33a88',\n      'Accept': 'application/json'\n    };\n    if (body) {\n      headers['Content-Type'] = 'application/json';\n    }\n    const req = http.request({\n      hostname: '192.168.1.240',\n      port: 8085,\n      path: endpoint.replace(/\\[/g, '%5B').replace(/\\]/g, '%5D'),\n      method: method,\n      headers: headers\n    }, (res) => {\n      let data = '';\n      res.on('data', chunk => data += chunk);\n      res.on('end', () => {\n        try {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: JSON.parse(data)\n          });\n        } catch (e) {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: data\n          });\n        }\n      });\n    });\n    req.on('error', err => resolve({ ok: false, status: 500, data: { message: err.message } }));\n    if (body) {\n      req.write(typeof body === 'string' ? body : JSON.stringify(body));\n    }\n    req.end();\n  });\n};\n\nfunction normalizePhone(num) {\n  if (!num) return num;\n  let digits = String(num).replace(/[^0-9+]/g, '');\n  if (digits.startsWith('+')) return digits;\n  if (digits.length === 10) return '+1' + digits;\n  if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;\n  return '+' + digits;\n}\n\nlet rawInput = {};\ntry { rawInput = query; } catch (e) { try { rawInput = input; } catch (e2) { rawInput = {}; } }\nlet params = {};\nif (typeof rawInput === 'string') {\n  try { params = JSON.parse(rawInput); } catch (e) { params = { query: rawInput }; }\n} else if (rawInput && typeof rawInput === 'object') {\n  params = rawInput;\n}\n\nconst action = (params.action || 'search').toLowerCase();\n\nif (action === 'delete') {\n  let companyId = params.id || params.company_id;\n  if (!companyId && params.name) {\n    const searchRes = await requestCrm('/api/v1/companies?filter[name]=' + encodeURIComponent(params.name));\n    const found = searchRes.data?.data || [];\n    if (found.length === 0) return JSON.stringify({ error: `No company found matching name '${params.name}'.` });\n    companyId = found[0].id;\n  }\n  if (!companyId) return JSON.stringify({ error: \"Missing company ID or name to delete.\" });\n  const res = await requestCrm('/api/v1/companies/' + companyId, 'DELETE');\n  if (!res.ok && res.status !== 204) return JSON.stringify({ error: res.data?.message || 'Delete failed' });\n  return JSON.stringify({ success: true, deleted_id: companyId, message: \"Company deleted successfully.\" });\n}\n\nif (action === 'search' || action === 'list') {\n  let url = '/api/v1/companies?per_page=25';\n  if (params.name) url += '&filter[name]=' + encodeURIComponent(params.name);\n  const res = await requestCrm(url);\n  if (!res.ok) return JSON.stringify({ error: res.data?.message || 'Search failed' });\n  const companies = (res.data?.data || []).map(c => {\n    const cf = c.attributes?.custom_fields || {};\n    return {\n      id: c.id,\n      name: c.attributes?.name,\n      phone: cf.phone_number || null,\n      email: cf.email_address || null,\n      poc: cf.poc || null,\n      domain: cf.domains || null,\n      business: cf.business || null\n    };\n  });\n  return JSON.stringify({ total: companies.length, companies });\n}\n\nif (action === 'create') {\n  if (!params.name) return JSON.stringify({ error: \"Missing required company name.\" });\n  const payload = { name: params.name, custom_fields: {} };\n  if (params.phone_number) payload.custom_fields.phone_number = normalizePhone(params.phone_number);\n  if (params.email) payload.custom_fields.email_address = params.email;\n  if (params.poc) payload.custom_fields.poc = params.poc;\n  if (params.domain) {\n    const dList = Array.isArray(params.domain) ? params.domain : [params.domain];\n    payload.custom_fields.domains = dList;\n  }\n  if (params.business) payload.custom_fields.business = params.business;\n  const res = await requestCrm('/api/v1/companies', 'POST', payload);\n  if (!res.ok) return JSON.stringify({ error: res.data?.message || 'Create failed', details: res.data?.errors });\n  return JSON.stringify({ success: true, id: res.data?.data?.id, name: res.data?.data?.attributes?.name, message: \"Company created successfully.\" });\n}\n\nif (action === 'update') {\n  const companyId = params.id || params.company_id;\n  if (!companyId) return JSON.stringify({ error: \"Missing company ID to update.\" });\n  const payload = {};\n  if (params.name) payload.name = params.name;\n  const cf = {};\n  if (params.phone_number) cf.phone_number = normalizePhone(params.phone_number);\n  if (params.email) cf.email_address = params.email;\n  if (params.poc) cf.poc = params.poc;\n  if (params.domain) {\n    const dList = Array.isArray(params.domain) ? params.domain : [params.domain];\n    cf.domains = dList;\n  }\n  if (params.business) cf.business = params.business;\n  if (Object.keys(cf).length > 0) payload.custom_fields = cf;\n  const res = await requestCrm('/api/v1/companies/' + companyId, 'PUT', payload);\n  if (!res.ok) return JSON.stringify({ error: res.data?.message || 'Update failed', details: res.data?.errors });\n  return JSON.stringify({ success: true, updated_id: companyId, name: res.data?.data?.attributes?.name, message: \"Company updated successfully.\" });\n}\n\nreturn JSON.stringify({ error: \"Unknown action: \" + action });\n"
+        }
+      },
+      {
+        "id": "node-tool-manage-tasks",
+        "name": "manage_tasks",
+        "type": "@n8n/n8n-nodes-langchain.toolCode",
+        "typeVersion": 1.1,
+        "position": [
+          1120,
+          320
+        ],
+        "parameters": {
+          "name": "manage_tasks",
+          "description": "Manage tasks in Relaticle CRM (action: 'list', 'create', 'update', 'delete').",
+          "specifyInputSchema": true,
+          "schemaType": "manual",
+          "inputSchema": "{\"type\": \"object\", \"properties\": {\"action\": {\"type\": \"string\", \"enum\": [\"list\", \"create\", \"update\", \"delete\"], \"description\": \"Action to perform\"}, \"id\": {\"type\": [\"string\", \"null\"], \"description\": \"Task ID (required for update/delete)\"}, \"title\": {\"type\": [\"string\", \"null\"], \"description\": \"Task title\"}, \"status\": {\"type\": [\"string\", \"null\"], \"enum\": [\"To do\", \"In progress\", \"Done\", null], \"description\": \"Task status\"}, \"priority\": {\"type\": [\"string\", \"null\"], \"enum\": [\"Low\", \"Medium\", \"High\", null], \"description\": \"Task priority\"}, \"due_date\": {\"type\": [\"string\", \"null\"], \"description\": \"Due date (YYYY-MM-DD)\"}, \"description\": {\"type\": [\"string\", \"null\"], \"description\": \"Task description\"}, \"contact_id\": {\"type\": [\"string\", \"null\"], \"description\": \"Link to person/contact ID\"}, \"company_id\": {\"type\": [\"string\", \"null\"], \"description\": \"Link to company ID\"}}, \"required\": [\"action\"]}",
+          "jsCode": "\nconst requestCrm = async (endpoint, method = 'GET', body = null) => {\n  const http = require('http');\n  return new Promise((resolve, reject) => {\n    const headers = {\n      'Authorization': 'Bearer 2|JzLpq8SvB7EsRRks5NzFZwwtZTubJ2jEMD3RTklP57b33a88',\n      'Accept': 'application/json'\n    };\n    if (body) {\n      headers['Content-Type'] = 'application/json';\n    }\n    const req = http.request({\n      hostname: '192.168.1.240',\n      port: 8085,\n      path: endpoint.replace(/\\[/g, '%5B').replace(/\\]/g, '%5D'),\n      method: method,\n      headers: headers\n    }, (res) => {\n      let data = '';\n      res.on('data', chunk => data += chunk);\n      res.on('end', () => {\n        try {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: JSON.parse(data)\n          });\n        } catch (e) {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: data\n          });\n        }\n      });\n    });\n    req.on('error', err => resolve({ ok: false, status: 500, data: { message: err.message } }));\n    if (body) {\n      req.write(typeof body === 'string' ? body : JSON.stringify(body));\n    }\n    req.end();\n  });\n};\n\nfunction normalizePhone(num) {\n  if (!num) return num;\n  let digits = String(num).replace(/[^0-9+]/g, '');\n  if (digits.startsWith('+')) return digits;\n  if (digits.length === 10) return '+1' + digits;\n  if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;\n  return '+' + digits;\n}\n\nlet rawInput = {};\ntry { rawInput = query; } catch (e) { try { rawInput = input; } catch (e2) { rawInput = {}; } }\nlet params = {};\nif (typeof rawInput === 'string') {\n  try { params = JSON.parse(rawInput); } catch (e) { params = { query: rawInput }; }\n} else if (rawInput && typeof rawInput === 'object') {\n  params = rawInput;\n}\n\nconst action = (params.action || 'list').toLowerCase();\nconst statusMap = {\n  'to do': '01m35s6hvyb83xwkj01qsnvm2v',\n  'in progress': '01m35s6hw094d9sd38ew4kwzsm',\n  'done': '01m35s6hw2ppnebfbpet18n12z'\n};\nconst priorityMap = {\n  'low': '01m35s6hwac52xhqexemcjbv94',\n  'medium': '01m35s6hwc08qa20pphz7gnncg',\n  'high': '01m35s6hwfxgjsbx2r2mshm0nz'\n};\n\nif (action === 'delete') {\n  let taskId = params.id || params.task_id;\n  if (!taskId && params.title) {\n    const listRes = await requestCrm('/api/v1/tasks?per_page=50');\n    const found = (listRes.data?.data || []).find(t => (t.attributes?.title || '').toLowerCase() === params.title.toLowerCase());\n    if (found) taskId = found.id;\n  }\n  if (!taskId) return JSON.stringify({ error: \"Missing task ID or title to delete.\" });\n  const res = await requestCrm('/api/v1/tasks/' + taskId, 'DELETE');\n  if (!res.ok && res.status !== 204) return JSON.stringify({ error: res.data?.message || 'Delete failed' });\n  return JSON.stringify({ success: true, deleted_id: taskId, message: \"Task deleted successfully.\" });\n}\n\nif (action === 'list') {\n  const res = await requestCrm('/api/v1/tasks?per_page=30');\n  if (!res.ok) return JSON.stringify({ error: res.data?.message || 'List failed' });\n  const tasks = (res.data?.data || []).map(t => {\n    const cf = t.attributes?.custom_fields || {};\n    return {\n      id: t.id,\n      title: t.attributes?.title,\n      status: cf.status?.label || 'To do',\n      priority: cf.priority?.label || 'Medium',\n      due_date: cf.due_date || null,\n      description: cf.description || null\n    };\n  });\n  return JSON.stringify({ total: tasks.length, tasks });\n}\n\nif (action === 'create') {\n  if (!params.title) return JSON.stringify({ error: \"Missing required task title.\" });\n  const payload = {\n    title: params.title,\n    custom_fields: {}\n  };\n  if (params.contact_id) payload.people_ids = [params.contact_id];\n  if (params.company_id) payload.company_ids = [params.company_id];\n  if (params.status) {\n    const s = statusMap[String(params.status).toLowerCase()];\n    if (s) payload.custom_fields.status = s;\n  }\n  if (params.priority) {\n    const p = priorityMap[String(params.priority).toLowerCase()];\n    if (p) payload.custom_fields.priority = p;\n  }\n  if (params.due_date) payload.custom_fields.due_date = params.due_date;\n  if (params.description) payload.custom_fields.description = params.description;\n\n  const res = await requestCrm('/api/v1/tasks', 'POST', payload);\n  if (!res.ok) return JSON.stringify({ error: res.data?.message || 'Create failed', details: res.data?.errors });\n  return JSON.stringify({ success: true, id: res.data?.data?.id, title: res.data?.data?.attributes?.title, message: \"Task created successfully.\" });\n}\n\nif (action === 'update') {\n  const taskId = params.id || params.task_id;\n  if (!taskId) return JSON.stringify({ error: \"Missing task ID to update.\" });\n  const payload = {};\n  if (params.title) payload.title = params.title;\n  const cf = {};\n  if (params.status) {\n    const s = statusMap[String(params.status).toLowerCase()];\n    if (s) cf.status = s;\n  }\n  if (params.priority) {\n    const p = priorityMap[String(params.priority).toLowerCase()];\n    if (p) cf.priority = p;\n  }\n  if (params.due_date !== undefined) cf.due_date = params.due_date;\n  if (params.description !== undefined) cf.description = params.description;\n  if (Object.keys(cf).length > 0) payload.custom_fields = cf;\n\n  const res = await requestCrm('/api/v1/tasks/' + taskId, 'PUT', payload);\n  if (!res.ok) return JSON.stringify({ error: res.data?.message || 'Update failed', details: res.data?.errors });\n  return JSON.stringify({ success: true, updated_id: taskId, title: res.data?.data?.attributes?.title, message: \"Task updated successfully.\" });\n}\n\nreturn JSON.stringify({ error: \"Unknown action: \" + action });\n"
+        }
+      },
+      {
+        "id": "node-tool-manage-notes",
+        "name": "manage_notes",
+        "type": "@n8n/n8n-nodes-langchain.toolCode",
+        "typeVersion": 1.1,
+        "position": [
+          1120,
+          440
+        ],
+        "parameters": {
+          "name": "manage_notes",
+          "description": "Manage notes in Relaticle CRM (action: 'list', 'create', 'delete').",
+          "specifyInputSchema": true,
+          "schemaType": "manual",
+          "inputSchema": "{\"type\": \"object\", \"properties\": {\"action\": {\"type\": \"string\", \"enum\": [\"list\", \"create\", \"delete\"], \"description\": \"Action to perform\"}, \"id\": {\"type\": [\"string\", \"null\"], \"description\": \"Note ID (required for delete)\"}, \"title\": {\"type\": [\"string\", \"null\"], \"description\": \"Note title / subject\"}, \"body\": {\"type\": [\"string\", \"null\"], \"description\": \"Note content / details\"}, \"contact_id\": {\"type\": [\"string\", \"null\"], \"description\": \"Link to contact ID\"}, \"company_id\": {\"type\": [\"string\", \"null\"], \"description\": \"Link to company ID\"}, \"opportunity_id\": {\"type\": [\"string\", \"null\"], \"description\": \"Link to opportunity ID\"}}, \"required\": [\"action\"]}",
+          "jsCode": "\nconst requestCrm = async (endpoint, method = 'GET', body = null) => {\n  const http = require('http');\n  return new Promise((resolve, reject) => {\n    const headers = {\n      'Authorization': 'Bearer 2|JzLpq8SvB7EsRRks5NzFZwwtZTubJ2jEMD3RTklP57b33a88',\n      'Accept': 'application/json'\n    };\n    if (body) {\n      headers['Content-Type'] = 'application/json';\n    }\n    const req = http.request({\n      hostname: '192.168.1.240',\n      port: 8085,\n      path: endpoint.replace(/\\[/g, '%5B').replace(/\\]/g, '%5D'),\n      method: method,\n      headers: headers\n    }, (res) => {\n      let data = '';\n      res.on('data', chunk => data += chunk);\n      res.on('end', () => {\n        try {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: JSON.parse(data)\n          });\n        } catch (e) {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: data\n          });\n        }\n      });\n    });\n    req.on('error', err => resolve({ ok: false, status: 500, data: { message: err.message } }));\n    if (body) {\n      req.write(typeof body === 'string' ? body : JSON.stringify(body));\n    }\n    req.end();\n  });\n};\n\nfunction normalizePhone(num) {\n  if (!num) return num;\n  let digits = String(num).replace(/[^0-9+]/g, '');\n  if (digits.startsWith('+')) return digits;\n  if (digits.length === 10) return '+1' + digits;\n  if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;\n  return '+' + digits;\n}\n\nlet rawInput = {};\ntry { rawInput = query; } catch (e) { try { rawInput = input; } catch (e2) { rawInput = {}; } }\nlet params = {};\nif (typeof rawInput === 'string') {\n  try { params = JSON.parse(rawInput); } catch (e) { params = { query: rawInput }; }\n} else if (rawInput && typeof rawInput === 'object') {\n  params = rawInput;\n}\n\nconst action = (params.action || 'list').toLowerCase();\n\nif (action === 'delete') {\n  let noteId = params.id || params.note_id;\n  if (!noteId && params.title) {\n    const listRes = await requestCrm('/api/v1/notes?per_page=50');\n    const found = (listRes.data?.data || []).find(n => (n.attributes?.title || '').toLowerCase() === params.title.toLowerCase());\n    if (found) noteId = found.id;\n  }\n  if (!noteId) return JSON.stringify({ error: \"Missing note ID or title to delete.\" });\n  const res = await requestCrm('/api/v1/notes/' + noteId, 'DELETE');\n  if (!res.ok && res.status !== 204) return JSON.stringify({ error: res.data?.message || 'Delete failed' });\n  return JSON.stringify({ success: true, deleted_id: noteId, message: \"Note deleted successfully.\" });\n}\n\nif (action === 'list') {\n  const res = await requestCrm('/api/v1/notes?per_page=30');\n  if (!res.ok) return JSON.stringify({ error: res.data?.message || 'List failed' });\n  const notes = (res.data?.data || []).map(n => {\n    const cf = n.attributes?.custom_fields || {};\n    return {\n      id: n.id,\n      title: n.attributes?.title,\n      body: cf.body || null,\n      created_at: n.attributes?.created_at\n    };\n  });\n  return JSON.stringify({ total: notes.length, notes });\n}\n\nif (action === 'create') {\n  if (!params.title) return JSON.stringify({ error: \"Missing required note title.\" });\n  const payload = {\n    title: params.title,\n    custom_fields: {}\n  };\n  if (params.contact_id) payload.people_ids = [params.contact_id];\n  if (params.company_id) payload.company_ids = [params.company_id];\n  if (params.opportunity_id) payload.opportunity_ids = [params.opportunity_id];\n  if (params.body) {\n    payload.custom_fields.body = params.body;\n  }\n\n  const res = await requestCrm('/api/v1/notes', 'POST', payload);\n  if (!res.ok) return JSON.stringify({ error: res.data?.message || 'Create failed', details: res.data?.errors });\n  return JSON.stringify({ success: true, id: res.data?.data?.id, title: res.data?.data?.attributes?.title, message: \"Note created successfully.\" });\n}\n\nreturn JSON.stringify({ error: \"Unknown action: \" + action });\n"
+        }
+      },
+      {
+        "id": "node-tool-manage-opportunities",
+        "name": "manage_opportunities",
+        "type": "@n8n/n8n-nodes-langchain.toolCode",
+        "typeVersion": 1.1,
+        "position": [
+          1120,
+          560
+        ],
+        "parameters": {
+          "name": "manage_opportunities",
+          "description": "Manage opportunities/deals in Relaticle CRM (action: 'list', 'create', 'update', 'delete').",
+          "specifyInputSchema": true,
+          "schemaType": "manual",
+          "inputSchema": "{\"type\": \"object\", \"properties\": {\"action\": {\"type\": \"string\", \"enum\": [\"list\", \"create\", \"update\", \"delete\"], \"description\": \"Action to perform\"}, \"id\": {\"type\": [\"string\", \"null\"], \"description\": \"Opportunity ID (required for update/delete)\"}, \"name\": {\"type\": [\"string\", \"null\"], \"description\": \"Opportunity / deal name\"}, \"amount\": {\"type\": [\"number\", \"null\"], \"description\": \"Deal amount in dollars\"}, \"stage\": {\"type\": [\"string\", \"null\"], \"enum\": [\"Prospecting\", \"Qualification\", \"Needs Analysis\", \"Value Proposition\", \"Proposal/Price Quote\", \"Negotiation/Review\", \"Closed Won\", \"Closed Lost\", null], \"description\": \"Deal pipeline stage\"}, \"close_date\": {\"type\": [\"string\", \"null\"], \"description\": \"Expected close date (YYYY-MM-DD)\"}, \"contact_id\": {\"type\": [\"string\", \"null\"], \"description\": \"Link to contact ID\"}, \"company_id\": {\"type\": [\"string\", \"null\"], \"description\": \"Link to company ID\"}}, \"required\": [\"action\"]}",
+          "jsCode": "\nconst requestCrm = async (endpoint, method = 'GET', body = null) => {\n  const http = require('http');\n  return new Promise((resolve, reject) => {\n    const headers = {\n      'Authorization': 'Bearer 2|JzLpq8SvB7EsRRks5NzFZwwtZTubJ2jEMD3RTklP57b33a88',\n      'Accept': 'application/json'\n    };\n    if (body) {\n      headers['Content-Type'] = 'application/json';\n    }\n    const req = http.request({\n      hostname: '192.168.1.240',\n      port: 8085,\n      path: endpoint.replace(/\\[/g, '%5B').replace(/\\]/g, '%5D'),\n      method: method,\n      headers: headers\n    }, (res) => {\n      let data = '';\n      res.on('data', chunk => data += chunk);\n      res.on('end', () => {\n        try {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: JSON.parse(data)\n          });\n        } catch (e) {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: data\n          });\n        }\n      });\n    });\n    req.on('error', err => resolve({ ok: false, status: 500, data: { message: err.message } }));\n    if (body) {\n      req.write(typeof body === 'string' ? body : JSON.stringify(body));\n    }\n    req.end();\n  });\n};\n\nfunction normalizePhone(num) {\n  if (!num) return num;\n  let digits = String(num).replace(/[^0-9+]/g, '');\n  if (digits.startsWith('+')) return digits;\n  if (digits.length === 10) return '+1' + digits;\n  if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;\n  return '+' + digits;\n}\n\nlet rawInput = {};\ntry { rawInput = query; } catch (e) { try { rawInput = input; } catch (e2) { rawInput = {}; } }\nlet params = {};\nif (typeof rawInput === 'string') {\n  try { params = JSON.parse(rawInput); } catch (e) { params = { query: rawInput }; }\n} else if (rawInput && typeof rawInput === 'object') {\n  params = rawInput;\n}\n\nconst action = (params.action || 'list').toLowerCase();\nconst stageMap = {\n  'prospecting': '01m35s6hthx78zmctcba8hq05k',\n  'qualification': '01m35s6htnyfq94hrbpqyvzrv3',\n  'needs analysis': '01m35s6htqvy2fks0w4s951jph',\n  'value proposition': '01m35s6htsjpcxfcrw8jh96yyj',\n  'id. decision makers': '01m35s6htv59y94t362f089drz',\n  'perception analysis': '01m35s6hty5bbn6qwcy40bej7e',\n  'proposal/price quote': '01m35s6hv0res6gmr3cs43zt3b',\n  'negotiation/review': '01m35s6hv2vqhnzgkcb7vm3wp2',\n  'closed won': '01m35s6hv4qbzkea2rdhjcbd5h',\n  'closed lost': '01m35s6hv6d6cevdpenftkf7ew'\n};\n\nif (action === 'delete') {\n  let oppId = params.id || params.opportunity_id;\n  if (!oppId && params.name) {\n    const listRes = await requestCrm('/api/v1/opportunities?per_page=50');\n    const found = (listRes.data?.data || []).find(o => (o.attributes?.name || '').toLowerCase() === params.name.toLowerCase());\n    if (found) oppId = found.id;\n  }\n  if (!oppId) return JSON.stringify({ error: \"Missing opportunity ID or name to delete.\" });\n  const res = await requestCrm('/api/v1/opportunities/' + oppId, 'DELETE');\n  if (!res.ok && res.status !== 204) return JSON.stringify({ error: res.data?.message || 'Delete failed' });\n  return JSON.stringify({ success: true, deleted_id: oppId, message: \"Opportunity deleted successfully.\" });\n}\n\nif (action === 'list') {\n  const res = await requestCrm('/api/v1/opportunities?per_page=30');\n  if (!res.ok) return JSON.stringify({ error: res.data?.message || 'List failed' });\n  const opps = (res.data?.data || []).map(o => {\n    const cf = o.attributes?.custom_fields || {};\n    return {\n      id: o.id,\n      name: o.attributes?.name,\n      contact_id: o.attributes?.contact_id,\n      company_id: o.attributes?.company_id,\n      amount: cf.amount || null,\n      stage: cf.stage?.label || null,\n      close_date: cf.close_date || null\n    };\n  });\n  return JSON.stringify({ total: opps.length, opportunities: opps });\n}\n\nif (action === 'create') {\n  if (!params.name) return JSON.stringify({ error: \"Missing required opportunity name.\" });\n  const payload = {\n    name: params.name,\n    custom_fields: {}\n  };\n  if (params.contact_id) payload.contact_id = params.contact_id;\n  if (params.company_id) payload.company_id = params.company_id;\n  if (params.amount !== undefined) payload.custom_fields.amount = parseFloat(params.amount);\n  if (params.close_date) payload.custom_fields.close_date = params.close_date;\n  if (params.stage) {\n    const s = stageMap[String(params.stage).toLowerCase()];\n    if (s) payload.custom_fields.stage = s;\n  }\n\n  const res = await requestCrm('/api/v1/opportunities', 'POST', payload);\n  if (!res.ok) return JSON.stringify({ error: res.data?.message || 'Create failed', details: res.data?.errors });\n  return JSON.stringify({ success: true, id: res.data?.data?.id, name: res.data?.data?.attributes?.name, message: \"Opportunity created successfully.\" });\n}\n\nif (action === 'update') {\n  const oppId = params.id || params.opportunity_id;\n  if (!oppId) return JSON.stringify({ error: \"Missing opportunity ID to update.\" });\n  const payload = {};\n  if (params.name) payload.name = params.name;\n  const cf = {};\n  if (params.amount !== undefined) cf.amount = parseFloat(params.amount);\n  if (params.close_date !== undefined) cf.close_date = params.close_date;\n  if (params.stage) {\n    const s = stageMap[String(params.stage).toLowerCase()];\n    if (s) cf.stage = s;\n  }\n  if (Object.keys(cf).length > 0) payload.custom_fields = cf;\n\n  const res = await requestCrm('/api/v1/opportunities/' + oppId, 'PUT', payload);\n  if (!res.ok) return JSON.stringify({ error: res.data?.message || 'Update failed', details: res.data?.errors });\n  return JSON.stringify({ success: true, updated_id: oppId, name: res.data?.data?.attributes?.name, message: \"Opportunity updated successfully.\" });\n}\n\nreturn JSON.stringify({ error: \"Unknown action: \" + action });\n"
+        }
+      },
+      {
+        "id": "node-tool-manage-custom-fields",
+        "name": "manage_custom_fields",
+        "type": "@n8n/n8n-nodes-langchain.toolCode",
+        "typeVersion": 1.1,
+        "position": [
+          1120,
+          680
+        ],
+        "parameters": {
+          "name": "manage_custom_fields",
+          "description": "Manage custom field definitions in Relaticle CRM (action: 'list', 'create', 'delete').",
+          "specifyInputSchema": true,
+          "schemaType": "manual",
+          "inputSchema": "{\"type\": \"object\", \"properties\": {\"action\": {\"type\": \"string\", \"enum\": [\"list\", \"create\", \"delete\"], \"description\": \"Action to perform\"}, \"id\": {\"type\": [\"string\", \"null\"], \"description\": \"Custom field ID (required for delete)\"}, \"entity_type\": {\"type\": [\"string\", \"null\"], \"enum\": [\"people\", \"company\", \"task\", \"note\", \"opportunity\", null], \"description\": \"Entity type to filter or add field to\"}, \"name\": {\"type\": [\"string\", \"null\"], \"description\": \"Display name of the custom field\"}, \"type\": {\"type\": [\"string\", \"null\"], \"enum\": [\"text\", \"number\", \"email\", \"phone\", \"link\", \"textarea\", \"checkbox\", \"date\", \"date-time\", \"select\", \"multi-select\", \"toggle\", null], \"description\": \"Field type (default text)\"}, \"options\": {\"type\": [\"array\", \"null\"], \"items\": {\"type\": \"string\"}, \"description\": \"Dropdown option labels (for select / multi-select)\"}}, \"required\": [\"action\"]}",
+          "jsCode": "\nconst requestCrm = async (endpoint, method = 'GET', body = null) => {\n  const http = require('http');\n  return new Promise((resolve, reject) => {\n    const headers = {\n      'Authorization': 'Bearer 2|JzLpq8SvB7EsRRks5NzFZwwtZTubJ2jEMD3RTklP57b33a88',\n      'Accept': 'application/json'\n    };\n    if (body) {\n      headers['Content-Type'] = 'application/json';\n    }\n    const req = http.request({\n      hostname: '192.168.1.240',\n      port: 8085,\n      path: endpoint.replace(/\\[/g, '%5B').replace(/\\]/g, '%5D'),\n      method: method,\n      headers: headers\n    }, (res) => {\n      let data = '';\n      res.on('data', chunk => data += chunk);\n      res.on('end', () => {\n        try {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: JSON.parse(data)\n          });\n        } catch (e) {\n          resolve({\n            ok: res.statusCode >= 200 && res.statusCode < 300,\n            status: res.statusCode,\n            data: data\n          });\n        }\n      });\n    });\n    req.on('error', err => resolve({ ok: false, status: 500, data: { message: err.message } }));\n    if (body) {\n      req.write(typeof body === 'string' ? body : JSON.stringify(body));\n    }\n    req.end();\n  });\n};\n\nfunction normalizePhone(num) {\n  if (!num) return num;\n  let digits = String(num).replace(/[^0-9+]/g, '');\n  if (digits.startsWith('+')) return digits;\n  if (digits.length === 10) return '+1' + digits;\n  if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;\n  return '+' + digits;\n}\n\nlet rawInput = {};\ntry { rawInput = query; } catch (e) { try { rawInput = input; } catch (e2) { rawInput = {}; } }\nlet params = {};\nif (typeof rawInput === 'string') {\n  try { params = JSON.parse(rawInput); } catch (e) { params = { query: rawInput }; }\n} else if (rawInput && typeof rawInput === 'object') {\n  params = rawInput;\n}\n\nconst action = (params.action || 'list').toLowerCase();\n\nif (action === 'delete') {\n  let fieldId = params.id || params.field_id;\n  if (!fieldId && params.name) {\n    const listRes = await requestCrm('/api/v1/custom-fields?per_page=50');\n    const found = (listRes.data?.data || []).find(f => (f.attributes?.name || '').toLowerCase() === params.name.toLowerCase());\n    if (found) fieldId = found.id;\n  }\n  if (!fieldId) return JSON.stringify({ error: \"Missing custom field ID or name to delete.\" });\n  const res = await requestCrm('/api/v1/custom-fields/' + fieldId, 'DELETE');\n  if (!res.ok && res.status !== 204) return JSON.stringify({ error: res.data?.message || 'Delete failed' });\n  return JSON.stringify({ success: true, deleted_id: fieldId, message: \"Custom field deleted successfully.\" });\n}\n\nif (action === 'list') {\n  let url = '/api/v1/custom-fields?per_page=50';\n  if (params.entity_type) url += '&entity_type=' + encodeURIComponent(params.entity_type);\n  const res = await requestCrm(url);\n  if (!res.ok) return JSON.stringify({ error: res.data?.message || 'List failed' });\n  const fields = (res.data?.data || []).map(f => {\n    return {\n      id: f.id,\n      name: f.attributes?.name,\n      code: f.attributes?.code,\n      entity_type: f.attributes?.entity_type,\n      type: f.attributes?.type,\n      options: (f.attributes?.options || []).map(o => o.label || o.name || o)\n    };\n  });\n  return JSON.stringify({ total: fields.length, custom_fields: fields });\n}\n\nif (action === 'create') {\n  if (!params.name) return JSON.stringify({ error: \"Missing required custom field name.\" });\n  const entityType = params.entity_type || 'people';\n  const fieldType = params.type || 'text';\n  const payload = {\n    entity_type: entityType,\n    name: params.name,\n    type: fieldType\n  };\n  if (Array.isArray(params.options) && params.options.length > 0) {\n    payload.options = params.options.map(o => ({ name: String(o) }));\n  }\n  const res = await requestCrm('/api/v1/custom-fields', 'POST', payload);\n  if (!res.ok) return JSON.stringify({ error: res.data?.message || 'Create failed', details: res.data?.errors });\n  return JSON.stringify({\n    success: true,\n    id: res.data?.data?.id,\n    name: res.data?.data?.attributes?.name,\n    code: res.data?.data?.attributes?.code,\n    type: res.data?.data?.attributes?.type,\n    entity_type: res.data?.data?.attributes?.entity_type,\n    message: \"Custom field created successfully in Relaticle CRM.\"\n  });\n}\n\nreturn JSON.stringify({ error: \"Unknown action: \" + action });\n"
+        }
+      }
+    ],
+    "connections": {
+      "When chat message received": {
+        "main": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ollama Chat Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Window Buffer Memory": {
+        "ai_memory": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_memory",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "search_contacts": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "create_contact": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "update_contact": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "delete_contact": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "manage_companies": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "manage_tasks": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "manage_notes": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "manage_opportunities": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "manage_custom_fields": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": null,
+    "meta": null,
+    "nodeGroups": [],
+    "pinData": null,
+    "versionId": "5d563759-4106-416b-bf2b-aa72bcf09d16",
+    "activeVersionId": "5d563759-4106-416b-bf2b-aa72bcf09d16",
+    "versionCounter": 10,
+    "triggerCount": 1,
+    "sourceWorkflowId": null,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-10-06T22:08:03.333Z",
+        "createdAt": "2026-10-06T22:08:03.333Z",
+        "role": "workflow:owner",
+        "workflowId": "crmRelaticleAssistant",
+        "projectId": "dsceMxUAlkx7KphM",
+        "project": {
+          "updatedAt": "2026-08-12T20:46:07.936Z",
+          "createdAt": "2026-08-12T20:45:17.318Z",
+          "id": "dsceMxUAlkx7KphM",
+          "name": "Lokesh Chanana <lokeshchanana@gmail.com>",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "customTelemetryTags": [],
+          "creatorId": "215739ab-bfbe-4533-946b-97b532f84a44"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": null,
+      "description": null
+    }
+  }
+]
