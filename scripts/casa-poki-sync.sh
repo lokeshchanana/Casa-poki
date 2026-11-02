@@ -40,9 +40,9 @@ if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "${REMOTE_USER}@${REMOTE_HOST}" "t
   exit 1
 fi
 
-# 3. Find latest snapshot on remote destination
-echo "[$(date -Is)] Finding latest common snapshot between ${LOCAL_POOL} and ${REMOTE_HOST}:${REMOTE_POOL}/${LOCAL_POOL}..."
-REMOTE_SNAPS=$(ssh -o BatchMode=yes "${REMOTE_USER}@${REMOTE_HOST}" "zfs list -H -o name -t snapshot -r ${REMOTE_POOL}/${LOCAL_POOL}" || true)
+# 3. Find latest common snapshot between local tank and remote nfspool
+echo "[$(date -Is)] Finding latest common snapshot between ${LOCAL_POOL} and ${REMOTE_HOST}:${REMOTE_POOL}..."
+REMOTE_SNAPS=$(ssh -o BatchMode=yes "${REMOTE_USER}@${REMOTE_HOST}" "zfs list -H -o name -t snapshot -r ${REMOTE_POOL}" || true)
 
 LATEST_COMMON=""
 if [ -n "${REMOTE_SNAPS}" ]; then
@@ -72,7 +72,7 @@ fi
 
 # 6. Ensure NFS export is active on remote
 echo "[$(date -Is)] Ensuring NFS export configuration on remote pool..."
-ssh -o BatchMode=yes "${REMOTE_USER}@${REMOTE_HOST}" "zfs set sharenfs='rw=@192.168.1.0/24,no_subtree_check,sync,no_root_squash' ${REMOTE_POOL}/${LOCAL_POOL} || true"
+ssh -o BatchMode=yes "${REMOTE_USER}@${REMOTE_HOST}" "zfs set sharenfs='rw=@192.168.1.0/24,no_subtree_check,sync,no_root_squash' ${REMOTE_POOL} || true"
 
 # 7. Prune snapshots older than RETENTION_DAYS
 CUTOFF_SEC=$(date -d "${RETENTION_DAYS} days ago" +%s)
@@ -83,15 +83,13 @@ for snap in $(zfs list -H -o name,creation -t snapshot -p -r "${LOCAL_POOL}" | g
   zfs destroy "${snap}" || true
 done
 
-REMOTE_PRUNE_CMD=$(cat << 'EOF_PRUNE'
+ssh -o BatchMode=yes "${REMOTE_USER}@${REMOTE_HOST}" "bash -s" << 'EOF_PRUNE'
 CUTOFF_SEC=$(date -d "14 days ago" +%s)
-for snap in $(zfs list -H -o name,creation -t snapshot -p -r nfspool/tank | grep '@daily-' | awk -v cutoff="${CUTOFF_SEC}" '$2 < cutoff {print $1}'); do
+for snap in $(zfs list -H -o name,creation -t snapshot -p -r nfspool | grep '@daily-' | awk -v cutoff="${CUTOFF_SEC}" '$2 < cutoff {print $1}'); do
   echo "Pruning remote snapshot: ${snap}"
   zfs destroy "${snap}" || true
 done
 EOF_PRUNE
-)
-ssh -o BatchMode=yes "${REMOTE_USER}@${REMOTE_HOST}" "bash -c '${REMOTE_PRUNE_CMD}'" || true
 
 echo "========================================================================"
 echo "[$(date -Is)] Nightly ZFS Tank Replication Finished Successfully!"

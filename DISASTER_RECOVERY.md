@@ -12,9 +12,9 @@ This repository contains the complete configuration, compose setups, and automat
   - Secrets: Stored directly on `/tank/<service>/.env` with `0600` permissions.
   - Symlinks: Linked from `/home/lokesh/Casa-poki/<service>/.env -> /tank/<service>/.env`.
 - **NFS / ZFS Mirror (`192.168.1.250`)**:
-  - Remote ZFS pool: `nfspool/tank`
+  - Remote ZFS pool: `nfspool`
   - Nightly snapshot and incremental replication runs automatically via `casa-poki-sync.timer` at 02:00 AM.
-  - NFS export: `192.168.1.250:/tank` (exported to `192.168.1.0/24`).
+  - NFS export: `192.168.1.250:/nfspool` (exported to `192.168.1.0/24`).
 
 ---
 

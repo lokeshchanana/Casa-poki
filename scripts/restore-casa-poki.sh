@@ -89,14 +89,16 @@ else
           exit 1
         fi
         zpool create -f -o ashift=12 tank "${TANK_DISK}"
-        log_info "Receiving ZFS snapshot stream from ${NFS_SERVER}..."
-        ssh "root@${NFS_SERVER}" "zfs send -R nfspool/tank@initial-sync" | zfs receive -F -d tank
+        log_info "Finding latest snapshot on ${NFS_SERVER}..."
+        LATEST_SNAP=$(ssh "root@${NFS_SERVER}" "zfs list -H -o name -t snapshot -r nfspool | grep -v '/' | tail -n 1" || echo "nfspool@initial-sync")
+        log_info "Receiving ZFS snapshot stream (${LATEST_SNAP}) from ${NFS_SERVER}..."
+        ssh "root@${NFS_SERVER}" "zfs send -R ${LATEST_SNAP}" | zfs receive -F -d tank
         log_ok "ZFS pool 'tank' restored from NFS server."
         ;;
       2)
         mkdir -p /tank
-        mount -t nfs -o proto=tcp,port=2049 "${NFS_SERVER}:/tank" /tank
-        echo "${NFS_SERVER}:/tank /tank nfs _netdev,nofail,bg,rw 0 0" >> /etc/fstab
+        mount -t nfs -o proto=tcp,port=2049 "${NFS_SERVER}:/nfspool" /tank
+        echo "${NFS_SERVER}:/nfspool /tank nfs _netdev,nofail,bg,rw 0 0" >> /etc/fstab
         log_ok "/tank mounted over NFS."
         ;;
       3)
