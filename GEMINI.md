@@ -18,3 +18,8 @@
 ## 3. Plan-First Execution Workflow
 - For any multi-step task, system modification, or code change, **first create a single, clear plan of action** and present it to the user for approval (or via an implementation plan artifact with `RequestFeedback: true`).
 - Once the user approves the plan, execute the entire plan end-to-end without stopping for step-by-step confirmation unless an unexpected blocker occurs.
+
+## 4. Mandatory Post-Task Synchronization & Secret Hygiene
+- **Secrets Management**: All secrets and environment variables MUST stay in their corresponding service tank (`/tank/<service>/.env`) with permissions `0600`, never committed to Git. Symlinks (`.env -> /tank/<service>/.env`) connect repo services to tank secrets. Always commit clean `.env.example` templates to Git.
+- **Git Synchronization**: For all tasks that change code, compose files, configurations, or scripts, always update Git, ensure no secrets or local databases are staged, and push changes to `https://github.com/lokeshchanana/Casa-poki.git`.
+- **NFS Replication Sync**: Maintain the nightly replication (`casa-poki-sync.timer` at 02:00 AM) to `192.168.1.250`. If significant changes to tank configurations or datasets are made, run a sync (`sudo /usr/local/bin/casa-poki-sync.sh`) to ensure the NFS mirror is current.
