@@ -314,3 +314,5 @@ All automated agents, scripts, and developers working on Casa-poki must strictly
    - All secrets must reside on `/tank/<service>/.env` (`0600`), never staged in Git.
    - Code changes must be committed and pushed to `https://github.com/lokeshchanana/Casa-poki.git`.
    - Maintain the nightly replication (`casa-poki-sync.timer`) to `192.168.1.250`.
+5. **Continuous Disaster Recovery Maintenance**:
+   - After every major architectural change (adding a new service, new container, altered volume mounts, network adjustments, or ZFS dataset modifications), always verify and update `scripts/restore-casa-poki.sh` and `README.md` so the bare-metal restore engine stays 100% current and tested.
