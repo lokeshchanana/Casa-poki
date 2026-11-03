@@ -77,6 +77,19 @@ def init_store() -> None:
         """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chat_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            tool_calls TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+
     # Seed default lessons if empty
     cur.execute("SELECT COUNT(*) FROM agent_lessons")
     if cur.fetchone()[0] == 0:
@@ -545,7 +558,7 @@ def get_system_summary() -> Dict[str, Any]:
         "token_stats": {
             "total_tokens_all_time": tot_row[0] if tot_row else 0,
             "avg_tokens_per_sec": round(tot_row[1], 1) if tot_row else 0.0,
-            "budget_per_task": 2000,
+            "budget_per_task": 32000,
             "throughput_target_tok_s": 500,
             "by_agent": by_agent,
         },
@@ -554,3 +567,63 @@ def get_system_summary() -> Dict[str, Any]:
         "recent_feedback": recent_feedback,
         "missing_workflows_backlog": get_backlog_specs(),
     }
+
+
+def add_chat_message(
+    session_id: str,
+    role: str,
+    content: str,
+    tool_calls: Optional[Any] = None,
+) -> None:
+    init_store()
+    now = datetime.utcnow().isoformat() + "Z"
+    tc_json = json.dumps(tool_calls) if tool_calls else None
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO chat_history (session_id, role, content, tool_calls, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (session_id, role, content, tc_json, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_chat_history(session_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT role, content, tool_calls, created_at
+        FROM chat_history
+        WHERE session_id = ?
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (session_id, limit),
+    )
+    rows = cur.fetchall()
+    conn.close()
+
+    history = []
+    for r in reversed(rows):
+        msg: Dict[str, Any] = {"role": r[0], "content": r[1]}
+        if r[2]:
+            try:
+                msg["tool_calls"] = json.loads(r[2])
+            except Exception:
+                pass
+        history.append(msg)
+    return history
+
+
+def clear_chat_history(session_id: str) -> None:
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM chat_history WHERE session_id = ?", (session_id,))
+    conn.commit()
+    conn.close()
