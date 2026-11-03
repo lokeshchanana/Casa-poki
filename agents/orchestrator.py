@@ -27,7 +27,7 @@ from state_store import (
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://192.168.1.240:11434")
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "crm-qwen:3b")
-DEFAULT_TASK_BUDGET = int(os.environ.get("TASK_TOKEN_BUDGET", "2000"))
+DEFAULT_TASK_BUDGET = int(os.environ.get("TASK_TOKEN_BUDGET", "32000"))
 
 
 def _extract_json(text: str) -> Dict[str, Any]:
@@ -51,7 +51,7 @@ async def call_ollama(
     agent_name: str,
     system_prompt: str,
     user_prompt: str,
-    max_tokens: int = 200,
+    max_tokens: int = 2000,
     json_mode: bool = True,
     temperature: float = 0.1,
 ) -> Dict[str, Any]:
@@ -187,20 +187,32 @@ def _extract_crm_payload_fast(user_message: str) -> Optional[Dict[str, Any]]:
 
     # 9. Contact Search with Compound Filtering (can_email, phone blank, email blank, limits)
     filters: Dict[str, Any] = {}
-    if any(k in low for k in ["can email is false", "can_email is false", "can email false", "can_email false", "cannot email", "can't email", "can email: false", "can email=false"]):
+    if any(k in low for k in ["can email is false", "can_email is false", "can email false", "can_email false", "cannot email", "can't email", "can email: false", "can email=false", "can't be emailed", "cannot be emailed", "cant be emailed"]):
         filters["can_email"] = False
-    elif any(k in low for k in ["can email is true", "can_email is true", "can email true", "can_email true", "can email: true", "can email=true"]):
+    elif any(k in low for k in ["can email is true", "can_email is true", "can email true", "can_email true", "can email: true", "can email=true", "can be emailed"]):
         filters["can_email"] = True
 
-    if any(ph in low for ph in ["phone is blank", "phone number is blank", "phone is empty", "phone number is empty", "no phone", "without phone", "missing phone"]):
+    if any(ph in low for ph in [
+        "phone is blank", "phone number is blank", "phone is empty", "phone number is empty",
+        "no phone", "without phone", "missing phone", "just email", "just emails", "only email",
+        "only emails", "emails only", "email only", "emails as contact", "email as contact",
+        "just have email", "just have emails", "have emails in contact", "have email in contact"
+    ]):
         filters["phone_blank"] = True
     elif any(ph in low for ph in ["has phone", "with phone", "phone is present", "phone is not empty", "phone number is present"]):
         filters["phone_present"] = True
 
-    if any(em in low for em in ["email is blank", "email address is blank", "email is empty", "no email", "without email", "missing email"]):
+    if any(em in low for em in [
+        "just email", "just emails", "only email", "only emails", "emails only", "email only",
+        "emails as contact", "email as contact", "has email", "with email",
+        "just have email", "just have emails", "have emails in contact", "have email in contact"
+    ]):
+        filters["email_present"] = True
+    elif any(em in low for em in ["email is blank", "email address is blank", "email is empty", "no email", "without email", "missing email"]):
         filters["email_blank"] = True
 
-    limit = 50
+    is_count = any(k in low for k in ["how many", "count", "number of", "total", "tally"])
+    limit = 500 if is_count else 50
     m_lim = re.search(r"\b(?:last|top|first)\s+(\d+)\b", low)
     if m_lim:
         limit = int(m_lim.group(1))
@@ -214,6 +226,7 @@ def _extract_crm_payload_fast(user_message: str) -> Optional[Dict[str, Any]]:
             "query": clean_em or "all",
             "filters": filters,
             "limit": limit,
+            "count_mode": is_count,
         }
 
     # Search by phone number (e.g. "Find user with phone number 8018601052")
@@ -225,21 +238,23 @@ def _extract_crm_payload_fast(user_message: str) -> Optional[Dict[str, Any]]:
             "query": clean_phone,
             "filters": filters,
             "limit": limit,
+            "count_mode": is_count,
         }
 
     # Compound queries or general listing with criteria (e.g. "Find all the people where can email is false and phone number is blank", "Show me last 5 people")
-    if filters or m_lim:
+    if filters or m_lim or is_count:
         return {
             "tool": "search_contacts",
             "query": "all",
             "filters": filters,
             "limit": limit,
+            "count_mode": is_count,
         }
 
     if any(w in low for w in ["list all contact", "show all contact", "all contact", "list contact", "all people", "list people"]):
-        return {"tool": "search_contacts", "query": "all", "filters": filters, "limit": limit}
+        return {"tool": "search_contacts", "query": "all", "filters": filters, "limit": limit, "count_mode": is_count}
     if "today" in low and any(w in low for w in ["contact", "user", "lead", "people", "added"]):
-        return {"tool": "search_contacts", "query": "today", "filters": filters, "limit": limit}
+        return {"tool": "search_contacts", "query": "today", "filters": filters, "limit": limit, "count_mode": is_count}
 
     patterns = [
         r"(?:does|is)\s+(?:there\s+)?(?:a\s+)?(?:user|contact|person|client|lead)?\s*(?:named|called)?\s*([a-zA-Z0-9@.+-]+)\s+exist",
@@ -288,6 +303,11 @@ def _format_crm_gateway_output(data: Any, req_payload: Dict[str, Any]) -> str:
                     c for c in contacts
                     if c.get("phone") and str(c.get("phone")).strip() not in ("", "N/A", "None")
                 ]
+            if filters.get("email_present"):
+                contacts = [
+                    c for c in contacts
+                    if c.get("email") and str(c.get("email")).strip() not in ("", "N/A", "None")
+                ]
             if filters.get("email_blank"):
                 contacts = [
                     c for c in contacts
@@ -306,15 +326,20 @@ def _format_crm_gateway_output(data: Any, req_payload: Dict[str, Any]) -> str:
             filter_desc_parts.append("phone=blank")
         if filters.get("phone_present"):
             filter_desc_parts.append("phone=present")
+        if filters.get("email_present"):
+            filter_desc_parts.append("email=present")
         if filters.get("email_blank"):
             filter_desc_parts.append("email=blank")
         filter_str = f" [Filters: {', '.join(filter_desc_parts)}]" if filter_desc_parts else ""
 
         total = len(contacts)
+        is_count_mode = req_payload.get("is_count") or req_payload.get("count_mode")
         if total == 0:
-            return f"### CRM Contact Search Result\nNo contacts matching **`{q}`**{filter_str} were found in Twenty CRM (`0 matching records`)."
+            count_zero = "### CRM Contact Count: **0 matching contacts found**\n" if is_count_mode else ""
+            return f"{count_zero}### CRM Contact Search Result\nNo contacts matching **`{q}`**{filter_str} were found in Twenty CRM (`0 matching records`)."
 
-        lines = [f"### CRM Contact Search Result (`{total}` verified matching records{filter_str})\n"]
+        header_title = f"### CRM Contact Count: **{total} matching contacts found**{filter_str}" if is_count_mode else f"### CRM Contact Search Result (`{total}` verified matching records{filter_str})"
+        lines = [f"{header_title}\n"]
         for c in contacts:
             lines.append(
                 f"- **{c.get('name')}** (ID: `{c.get('id')}`)\n"
@@ -499,7 +524,8 @@ def _classify_request_fast(user_message: str) -> Dict[str, Any]:
         action in u_low
         for action in [
             "search", "find", "show", "list", "lookup", "look up", "exist", "create", "add",
-            "delete", "remove", "update", "toggle", "where", "last 5", "last ", "top ", "who is in"
+            "delete", "remove", "update", "toggle", "where", "last 5", "last ", "top ", "who is in",
+            "how many", "count", "number of", "total", "tally"
         ]
     ):
         return {
@@ -700,20 +726,28 @@ async def run_multi_agent_pipeline(
         target_domain = fast_route.get("target_domain", "general")
         task_instruction = user_message
     else:
-        manager_system = """You are the Central Manager Agent. Classify the user request into JSON:
+        manager_system = """You are the Central Manager Agent for Lokesh Chanana Real Estate and Casa-poki.
+Analyze and classify the user request with high accuracy into JSON:
 {
   "intent": "EXECUTE_TASK" | "DIRECT_ANSWER" | "SYSTEM_FEEDBACK" | "INSPECT_SYSTEM" | "TEACH_AGENT",
   "target_domain": "crm" | "marketing" | "mailman" | "finance" | "general",
   "match_status": "MATCH_ACTIVE" | "MISSING_WORKFLOW" | "DIRECT_REPLY",
   "workflow_id": "crmRelaticleAssistant" | null,
   "missing_capability_summary": "explain what capability or n8n workflow is needed"
-}"""
+}
+
+Guidelines:
+- If the user asks about contacts, clients, leads, people, counts, permissions, deals, or tasks in CRM -> intent: "EXECUTE_TASK", target_domain: "crm", match_status: "MATCH_ACTIVE", workflow_id: "crmRelaticleAssistant".
+- If the user asks general questions, real estate advice, or greetings -> intent: "DIRECT_ANSWER", target_domain: "general", match_status: "DIRECT_REPLY".
+- If the user provides feedback or flags a previous error -> intent: "SYSTEM_FEEDBACK", target_domain: "system".
+- If the user teaches a rule ("Remember: ...") -> intent: "TEACH_AGENT".
+"""
         step1_llm = await call_ollama(
             task_id=task_id,
             agent_name="manager",
             system_prompt=manager_system,
             user_prompt=user_message,
-            max_tokens=120,
+            max_tokens=1500,
             json_mode=True,
         )
         step1_metrics = step1_llm["metrics"]
@@ -846,7 +880,7 @@ async def run_multi_agent_pipeline(
             },
         )
         lessons = [l["rule"] for l in get_lessons("manager")]
-        lessons_context = f"\nRelevant Lessons:\n" + "\n".join(f"- {r}" for r in lessons[:3]) if lessons else ""
+        lessons_context = f"\nRelevant Lessons:\n" + "\n".join(f"- {r}" for r in lessons[:10]) if lessons else ""
 
         manager_qa_prompt = f"""You are the Central Manager Agent for Lokesh Chanana Real Estate.
 Answer the user's question directly, clearly, concisely, and professionally.
@@ -857,7 +891,7 @@ Provide strategic advice, explanations, or greeting responses without hallucinat
             agent_name="manager",
             system_prompt=manager_qa_prompt,
             user_prompt=user_message,
-            max_tokens=300,
+            max_tokens=2000,
             json_mode=False,
             temperature=0.4,
         )
@@ -960,22 +994,31 @@ Provide strategic advice, explanations, or greeting responses without hallucinat
                 crm_payload = _extract_crm_payload_fast(user_message)
                 if not crm_payload:
                     it_extract_sys = """You are the IT Agent Preprocessor for Twenty CRM.
-Convert the user request into JSON:
+Convert the user request into structured JSON for CRM execution:
 {
   "tool": "search_contacts" | "create_contact" | "update_contact" | "delete_contact" | "manage_companies" | "manage_tasks" | "manage_opportunities" | "manage_custom_fields",
   "action": "list" | "search" | "create" | "update" | "delete",
-  "query": "search keyword, email, or phone",
+  "query": "search keyword, email, phone, or 'all'",
   "name": "contact or company name",
   "phone_number": "phone if provided",
   "email": "email if provided",
-  "can_email": "True or False if provided"
+  "can_email": "True or False if provided",
+  "filters": {
+    "can_email": true | false,
+    "phone_blank": true | false,
+    "phone_present": true | false,
+    "email_blank": true | false,
+    "email_present": true | false
+  },
+  "count_mode": true | false,
+  "limit": 500
 }"""
                     llm_ext = await call_ollama(
                         task_id=task_id,
                         agent_name="it_agent",
                         system_prompt=it_extract_sys,
                         user_prompt=user_message,
-                        max_tokens=120,
+                        max_tokens=1500,
                         json_mode=True,
                     )
                     it_metrics = llm_ext["metrics"]
@@ -1062,7 +1105,7 @@ Output JSON:
                     agent_name="it_agent",
                     system_prompt=it_ai_prompt,
                     user_prompt=user_message,
-                    max_tokens=100,
+                    max_tokens=1500,
                     json_mode=True,
                 )
                 it_metrics = it_ai_match["metrics"]
@@ -1165,7 +1208,7 @@ Output JSON:
                 agent_name="auditor",
                 system_prompt=auditor_system,
                 user_prompt=f"User Request: {user_message}\nGap: {it_result.get('reason')}",
-                max_tokens=150,
+                max_tokens=2000,
                 json_mode=True,
             )
             auditor_metrics = step3_llm["metrics"]
@@ -1198,7 +1241,7 @@ Output JSON:
             agent_name="auditor",
             system_prompt=auditor_diag_sys,
             user_prompt=f"User Request: {user_message}\nWorkflow: {it_result.get('workflow_name')}\nError: {it_result.get('error_message')}",
-            max_tokens=150,
+            max_tokens=2000,
             json_mode=True,
         )
         auditor_metrics = step3_llm["metrics"]
@@ -1237,7 +1280,7 @@ Output JSON:
                 agent_name="auditor",
                 system_prompt=auditor_eval_sys,
                 user_prompt=f"User Request: {user_message}\nPayload Sent: {json.dumps(pre_payload)}\nTools: {tools_invoked}",
-                max_tokens=100,
+                max_tokens=1500,
                 json_mode=True,
             )
             auditor_metrics = step3_llm["metrics"]
