@@ -18,6 +18,7 @@ from state_store import (
     get_lessons,
     get_system_summary,
     log_audit_result,
+    log_request_flow,
     log_token_usage,
     save_missing_workflow_spec,
     update_audit_status,
@@ -155,6 +156,7 @@ async def run_multi_agent_pipeline(
     4. Streams real-time ndjson events to the Check-in web app.
     """
     task_id = f"task_{uuid.uuid4().hex[:8]}"
+    start_time = time.time()
     tokens_used = 0
     trace_steps: List[Dict[str, Any]] = []
 
@@ -405,6 +407,45 @@ async def run_multi_agent_pipeline(
         add_chat_message(session_id, "user", user_message)
         add_chat_message(session_id, "assistant", formatted_result, tool_calls=[{"name": tool_name, "args": args}])
 
+        # Log request flow for the Virtual Office Floor Inspector
+        try:
+            steps_summary = [
+                {
+                    "step": "Planning & Orchestration",
+                    "agent": "Marcus Vance",
+                    "action": f"Analyzed prompt: '{user_message[:60]}...'",
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(start_time)),
+                    "status": "ok",
+                },
+                {
+                    "step": f"Tool Execution ({tool_name})",
+                    "agent": "Marcus Vance",
+                    "action": f"Executed tool `{tool_name}` with parameters: {json.dumps(args)[:120]}",
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "status": "ok" if (tool_result or {}).get("ok", True) else "warning",
+                },
+                {
+                    "step": "Quality & Verification",
+                    "agent": "Audrey Chen",
+                    "action": f"Audit verification ({audit_status}, quality: {quality_score}/10)",
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "status": "ok" if audit_ok else "warning",
+                },
+            ]
+            log_request_flow(
+                flow_id=f"flow_chat_{task_id}",
+                source="Manager Chat UI",
+                title=f"Chat: {user_message[:50]}",
+                status="completed" if audit_ok else "warning",
+                agents_involved=["Marcus Vance", "Audrey Chen"],
+                steps=steps_summary,
+                payload_preview={"input": user_message, "tool": tool_name, "args": args},
+                result_summary=formatted_result[:140],
+                duration_ms=int((time.time() - start_time) * 1000),
+            )
+        except Exception as e:
+            logger.warning(f"Could not log tool request flow: {e}")
+
         # Deliver final content
         yield emit("item", {"content": formatted_result})
         yield emit(
@@ -455,6 +496,46 @@ async def run_multi_agent_pipeline(
     final_msg = direct_content.strip() or "I have processed your request."
     add_chat_message(session_id, "user", user_message)
     add_chat_message(session_id, "assistant", final_msg)
+
+    # Log request flow for the Virtual Office Floor Inspector
+    try:
+        steps_summary = [
+            {
+                "step": "Planning & Orchestration",
+                "agent": "Marcus Vance",
+                "action": f"Analyzed prompt: '{user_message[:60]}...'",
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(start_time)),
+                "status": "ok",
+            }
+        ]
+        if invoked_tool_name:
+            steps_summary.append({
+                "step": f"Tool Execution ({invoked_tool_name})",
+                "agent": "Marcus Vance",
+                "action": f"Executed tool `{invoked_tool_name}` with parameters: {json.dumps(invoked_tool_args)[:120]}",
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "status": "ok" if (tool_result or {}).get("ok", True) else "warning",
+            })
+        steps_summary.append({
+            "step": "Quality & Verification",
+            "agent": "Audrey Chen",
+            "action": f"Audit quality verified (tokens: {tokens_used}, duration: {int((time.time() - start_time) * 1000)}ms)",
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "status": "ok",
+        })
+        log_request_flow(
+            flow_id=f"flow_chat_{task_id}",
+            source="Manager Chat UI",
+            title=f"Chat: {user_message[:50]}",
+            status="completed",
+            agents_involved=["Marcus Vance", "Audrey Chen"],
+            steps=steps_summary,
+            payload_preview={"input": user_message, "session_id": session_id},
+            result_summary=final_msg[:120],
+            duration_ms=int((time.time() - start_time) * 1000),
+        )
+    except Exception as e:
+        logger.warning(f"Could not log chat flow: {e}")
 
     yield emit("item", {"content": final_msg})
     yield emit(

@@ -3,12 +3,14 @@ import { ThemeProvider } from './context/ThemeContext';
 import AppNavigation from './components/AppNavigation';
 import OpenHouseSignIn from './components/OpenHouseSignIn';
 import ManagerChat from './components/ManagerChat';
+import OfficeFloor from './components/OfficeFloor';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get('tab');
     if (tabParam === 'manager' || tabParam === 'crm' || tabParam === 'chat') return 'manager';
+    if (tabParam === 'office' || tabParam === 'floor') return 'office';
     const saved = localStorage.getItem('checkin_active_tab');
     if (saved === 'crm') return 'manager';
     return saved || 'checkin';
@@ -27,10 +29,14 @@ export default function App() {
         />
         
         <main className="flex-1 flex flex-col">
-          {activeTab === 'checkin' ? (
+          {activeTab === 'checkin' && (
             <OpenHouseSignIn onOpenCrm={() => setActiveTab('manager')} />
-          ) : (
+          )}
+          {activeTab === 'manager' && (
             <ManagerChat onBackToCheckIn={() => setActiveTab('checkin')} />
+          )}
+          {activeTab === 'office' && (
+            <OfficeFloor />
           )}
         </main>
       </div>

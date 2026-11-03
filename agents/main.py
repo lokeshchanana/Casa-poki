@@ -1,12 +1,26 @@
-from typing import Optional
-from fastapi import FastAPI, HTTPException
+from typing import Any, Dict, List, Optional
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from infra_tools import (
+    check_uptime_kuma,
+    handle_infra_alert,
+    list_docker_containers,
+    restart_container,
+)
 from n8n_catalog import get_n8n_workflows
 from orchestrator import DEFAULT_MODEL, DEFAULT_TASK_BUDGET, run_multi_agent_pipeline
-from state_store import add_lesson, delete_lesson, get_system_summary, init_store
+from state_store import (
+    add_lesson,
+    delete_lesson,
+    get_office_floor_state,
+    get_recent_request_flows,
+    get_system_summary,
+    init_store,
+)
+from webhooks import handle_open_house_sign_in, handle_website_contact
 
 app = FastAPI(title="Multi-Agent Manager Hub (Manager + IT + Auditor)")
 
@@ -30,6 +44,10 @@ class LessonRequest(BaseModel):
     rule: str
 
 
+class HealRequest(BaseModel):
+    container_name: str
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_store()
@@ -49,6 +67,34 @@ def dashboard() -> dict:
         "workflows": workflows,
         **summary,
     }
+
+
+@app.get("/api/manager/office/floor-state")
+def office_floor_state() -> dict:
+    return get_office_floor_state()
+
+
+@app.get("/api/manager/office/flows")
+def office_flows(limit: int = 30) -> list:
+    return get_recent_request_flows(limit=limit)
+
+
+@app.get("/api/manager/office/containers")
+def office_containers() -> dict:
+    return list_docker_containers()
+
+
+@app.get("/api/manager/office/monitors")
+def office_monitors() -> dict:
+    return check_uptime_kuma()
+
+
+@app.post("/api/manager/office/heal")
+def manual_heal(req: HealRequest) -> dict:
+    res = restart_container(req.container_name)
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("error"))
+    return res
 
 
 @app.post("/api/manager/lessons")
@@ -79,3 +125,48 @@ async def manager_chat(req: ChatRequest):
         ),
         media_type="application/x-ndjson",
     )
+
+
+# =============================================================================
+# Inbound Webhook Endpoints (Direct to Agent Hub)
+# =============================================================================
+
+@app.post("/webhook/open-house-sign-in")
+async def webhook_open_house(req: Request) -> JSONResponse:
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    result = await handle_open_house_sign_in(body)
+    return JSONResponse(content=result)
+
+
+@app.post("/webhook/website-contact")
+async def webhook_website_contact(req: Request) -> JSONResponse:
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    result = await handle_website_contact(body)
+    return JSONResponse(content=result)
+
+
+@app.post("/webhook/infra-alert")
+@app.post("/api/agent/webhook/infra-alert")
+async def webhook_infra_alert(req: Request) -> JSONResponse:
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    result = await handle_infra_alert(body)
+    return JSONResponse(content=result)
+
+
+@app.post("/webhook/twenty-brevo-sync")
+async def webhook_brevo_sync(req: Request) -> JSONResponse:
+    return JSONResponse(content={"ok": True, "message": "Brevo sync acknowledged by Agent Hub."})
+
+
+@app.post("/webhook/brevo-event-webhook")
+async def webhook_brevo_event(req: Request) -> JSONResponse:
+    return JSONResponse(content={"ok": True, "message": "Brevo event acknowledged by Agent Hub."})

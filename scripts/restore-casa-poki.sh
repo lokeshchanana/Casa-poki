@@ -134,7 +134,7 @@ fi
 # ------------------------------------------------------------------------------
 log_info "Step 5: Verifying and re-linking service secrets from /tank..."
 
-SERVICES=("twenty" "postgres-db" "relaticle" "monitor" "mic-bridge" "cloudflared")
+SERVICES=("twenty" "postgres-db" "relaticle" "monitor" "mic-bridge" "cloudflared" "agents")
 
 for s in "${SERVICES[@]}"; do
   if [ -f "/tank/${s}/.env" ]; then

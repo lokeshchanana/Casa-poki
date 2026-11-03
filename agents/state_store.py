@@ -90,6 +90,24 @@ def init_store() -> None:
         """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS request_flows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            flow_id TEXT NOT NULL UNIQUE,
+            source TEXT NOT NULL,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL,
+            agents_involved TEXT NOT NULL,
+            steps TEXT NOT NULL,
+            payload_preview TEXT,
+            result_summary TEXT,
+            duration_ms INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+
     # Seed default lessons if empty
     cur.execute("SELECT COUNT(*) FROM agent_lessons")
     if cur.fetchone()[0] == 0:
@@ -627,3 +645,210 @@ def clear_chat_history(session_id: str) -> None:
     cur.execute("DELETE FROM chat_history WHERE session_id = ?", (session_id,))
     conn.commit()
     conn.close()
+
+
+def log_request_flow(
+    flow_id: str,
+    source: str,
+    title: str,
+    status: str,
+    agents_involved: List[str],
+    steps: List[Dict[str, Any]],
+    payload_preview: Optional[Any] = None,
+    result_summary: Optional[str] = None,
+    duration_ms: int = 0,
+) -> None:
+    init_store()
+    now = datetime.utcnow().isoformat() + "Z"
+    agents_json = json.dumps(agents_involved)
+    steps_json = json.dumps(steps)
+    payload_str = json.dumps(payload_preview) if isinstance(payload_preview, (dict, list)) else str(payload_preview or "")
+    
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT OR REPLACE INTO request_flows (
+            flow_id, source, title, status, agents_involved, steps, payload_preview, result_summary, duration_ms, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (flow_id, source, title, status, agents_json, steps_json, payload_str, result_summary or "", duration_ms, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_recent_request_flows(limit: int = 30) -> List[Dict[str, Any]]:
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT flow_id, source, title, status, agents_involved, steps, payload_preview, result_summary, duration_ms, created_at
+        FROM request_flows
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+
+    flows = []
+    for r in rows:
+        try:
+            agents = json.loads(r[4])
+        except Exception:
+            agents = []
+        try:
+            steps = json.loads(r[5])
+        except Exception:
+            steps = []
+        try:
+            payload = json.loads(r[6])
+        except Exception:
+            payload = r[6]
+            
+        flows.append({
+            "flow_id": r[0],
+            "source": r[1],
+            "title": r[2],
+            "status": r[3],
+            "agents_involved": agents,
+            "steps": steps,
+            "payload_preview": payload,
+            "result_summary": r[7],
+            "duration_ms": r[8],
+            "created_at": r[9],
+        })
+    return flows
+
+
+OFFICE_PERSONAS = [
+    {
+        "id": "manager",
+        "name": "Marcus Vance",
+        "role": "General Manager & Orchestrator",
+        "station": "Corner Office Suite",
+        "avatar": "👔",
+        "color": "indigo",
+        "default_activity": "Reviewing client portfolios & delegating requests",
+    },
+    {
+        "id": "it",
+        "name": "Ian Torres",
+        "role": "IT Systems & Infrastructure Guardian",
+        "station": "Server Pod & Telemetry Desk",
+        "avatar": "💻",
+        "color": "emerald",
+        "default_activity": "Auditing Docker containers & Uptime Kuma monitors",
+    },
+    {
+        "id": "auditor",
+        "name": "Audrey Chen",
+        "role": "Quality Assurance & Compliance Auditor",
+        "station": "Audit & Review Station",
+        "avatar": "📋",
+        "color": "amber",
+        "default_activity": "Verifying tool call outputs & architectural specs",
+    },
+    {
+        "id": "intake",
+        "name": "Miles Miller",
+        "role": "Client Intake & Communications",
+        "station": "Front Reception & Webhook Gateway",
+        "avatar": "📨",
+        "color": "blue",
+        "default_activity": "Processing Open House sign-ins & website inquiries",
+    },
+    {
+        "id": "finance",
+        "name": "Fiona Banks",
+        "role": "Financial Controller & Actual Budget",
+        "station": "Ledger & Statements Desk",
+        "avatar": "📊",
+        "color": "teal",
+        "default_activity": "Balancing bank statements & ledger reconciliations",
+    },
+    {
+        "id": "marketing",
+        "name": "Maya Reyes",
+        "role": "Creative Director & Listing Promotions",
+        "station": "Marketing Creative Studio",
+        "avatar": "🎨",
+        "color": "rose",
+        "default_activity": "Drafting open house announcements & marketing collateral",
+    },
+    {
+        "id": "cma",
+        "name": "Carter Hayes",
+        "role": "Real Estate Analyst & CMA Specialist",
+        "station": "Market Valuation Lab",
+        "avatar": "🏡",
+        "color": "violet",
+        "default_activity": "Analyzing Northwest MLS comps & valuation models",
+    },
+]
+
+
+def get_office_floor_state() -> Dict[str, Any]:
+    """
+    Computes real-time persona states based on recent events and idle habits.
+    """
+    flows = get_recent_request_flows(limit=10)
+    
+    # Check if any flow happened within the last 3 minutes
+    now = datetime.utcnow()
+    active_agent_names = set()
+    
+    for f in flows:
+        try:
+            created_dt = datetime.fromisoformat(f["created_at"].replace("Z", "+00:00")).replace(tzinfo=None)
+            diff_sec = (now - created_dt).total_seconds()
+            if diff_sec < 180: # Active in last 3 mins
+                for a in f.get("agents_involved", []):
+                    active_agent_names.add(a.lower())
+        except Exception:
+            pass
+
+    # Assign dynamic statuses
+    agents_state = []
+    for p in OFFICE_PERSONAS:
+        p_name_lower = p["name"].lower()
+        is_active = any(p_name_lower in a or p["id"] in a for a in active_agent_names)
+        
+        # Idle status variations: coffee break, watercooler, reviewing notes
+        minute = now.minute + hash(p["id"]) % 60
+        if is_active:
+            status = "active"
+            status_text = "Processing request..."
+            activity = f"Handling live task from recent flow"
+        else:
+            status = "idle"
+            if minute % 4 == 0:
+                status_text = "Coffee Break"
+                activity = "Grabbing an espresso in the kitchen ☕"
+            elif minute % 4 == 1:
+                status_text = "Watercooler Chat"
+                activity = "Chatting about current Bellevue market trends 🗣️"
+            elif minute % 4 == 2:
+                status_text = "Desk Research"
+                activity = p["default_activity"]
+            else:
+                status_text = "At Desk"
+                activity = "Monitoring incoming queue & reviewing logs 📖"
+
+        agents_state.append({
+            **p,
+            "status": status,
+            "status_text": status_text,
+            "current_activity": activity,
+        })
+
+    return {
+        "timestamp": now.isoformat() + "Z",
+        "agents": agents_state,
+        "recent_flows": flows,
+    }
+

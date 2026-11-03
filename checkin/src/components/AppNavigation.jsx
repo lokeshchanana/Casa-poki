@@ -3,6 +3,7 @@ import {
   ClipboardList, 
   MessageSquareCode, 
   BrainCircuit,
+  Users,
   Sun, 
   Moon, 
   Maximize2, 
@@ -63,6 +64,22 @@ export default function AppNavigation({ activeTab, setActiveTab, isKioskMode, to
             <BrainCircuit className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
             <span>Manager</span>
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Manager + IT + Auditor Active" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('office')}
+            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+              activeTab === 'office'
+                ? 'bg-white dark:bg-charcoal-dark text-neutral-900 dark:text-white shadow-sm'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            <span>Office Floor</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-bold">
+              7
+            </span>
           </button>
         </div>
 
