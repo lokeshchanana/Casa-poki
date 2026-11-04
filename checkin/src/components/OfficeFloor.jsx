@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import OfficeFloorMap from './OfficeFloorMap';
+import IsometricOfficeFloor from './IsometricOfficeFloor';
 import AvatarCharacter from './AvatarCharacter';
 import {
   Users,
@@ -236,8 +236,8 @@ export default function OfficeFloor({ onOpenChat }) {
         {activeView === 'floor' && (
           <div className="flex flex-col gap-6">
             
-            {/* Architectural Interactive Floor Map */}
-            <OfficeFloorMap
+            {/* Isometric Open Space Floor Map */}
+            <IsometricOfficeFloor
               agents={agents}
               recentFlows={flows}
               containers={containers}
