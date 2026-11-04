@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import OfficeFloorMap from './OfficeFloorMap';
+import AvatarCharacter from './AvatarCharacter';
 import {
   Users,
   Activity,
@@ -23,7 +25,7 @@ import {
   Eye
 } from 'lucide-react';
 
-export default function OfficeFloor() {
+export default function OfficeFloor({ onOpenChat }) {
   const [floorState, setFloorState] = useState(null);
   const [containers, setContainers] = useState([]);
   const [monitors, setMonitors] = useState([]);
@@ -234,142 +236,22 @@ export default function OfficeFloor() {
         {activeView === 'floor' && (
           <div className="flex flex-col gap-6">
             
-            {/* The Physical Office Architecture Board */}
-            <div className="relative rounded-2xl bg-white dark:bg-charcoal-dark border border-neutral-200/90 dark:border-neutral-800 p-6 shadow-sm overflow-hidden">
-              
-              {/* Architectural Grid pattern in background */}
-              <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#262626_1px,transparent_1px)] [background-size:16px_16px] opacity-40 pointer-events-none" />
-
-              {/* Office Section Headers */}
-              <div className="relative flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3 mb-6">
-                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-                  <span className="w-2 h-2 rounded-full bg-indigo-500" />
-                  <span>Main Operations Wing — Bellevue HQ Floor</span>
-                </div>
-                <div className="flex items-center gap-3 text-xs text-neutral-500">
-                  <span className="flex items-center gap-1">
-                    <Coffee className="w-3.5 h-3.5 text-amber-500" /> Breakroom & Kitchen Active
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Cpu className="w-3.5 h-3.5 text-emerald-500" /> 17/17 Pods Online
-                  </span>
-                </div>
-              </div>
-
-              {/* The Agent Desks & Stations Layout */}
-              <div className="relative grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {agents.map((agent) => {
-                  const isActive = agent.status === 'active';
-                  const isSelected = selectedAgent?.id === agent.id;
-
-                  return (
-                    <div
-                      key={agent.id}
-                      onClick={() => setSelectedAgent(agent)}
-                      className={`group relative rounded-xl p-4 transition-all duration-200 cursor-pointer border ${
-                        isActive
-                          ? 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-400 dark:border-amber-700 shadow-md ring-2 ring-amber-400/30'
-                          : isSelected
-                          ? 'bg-indigo-50/60 dark:bg-indigo-950/30 border-indigo-400 dark:border-indigo-600 shadow-sm'
-                          : 'bg-neutral-50/70 dark:bg-charcoal/60 hover:bg-white dark:hover:bg-charcoal border-neutral-200/80 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 shadow-xs'
-                      }`}
-                    >
-                      {/* Top Station Badge */}
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-[10px] font-mono uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
-                          {agent.station}
-                        </span>
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            isActive
-                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300 animate-pulse'
-                              : 'bg-neutral-200/70 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
-                          }`}
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-amber-500' : 'bg-emerald-500'}`} />
-                          {agent.status_text}
-                        </span>
-                      </div>
-
-                      {/* Persona Header */}
-                      <div className="flex items-start gap-3">
-                        <div className="relative flex-shrink-0">
-                          <div className="w-12 h-12 rounded-xl bg-white dark:bg-charcoal-dark border border-neutral-200 dark:border-neutral-700 flex items-center justify-center text-2xl shadow-xs group-hover:scale-105 transition-transform">
-                            {agent.avatar}
-                          </div>
-                          {isActive && (
-                            <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                              <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500" />
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-serif font-bold text-sm text-neutral-900 dark:text-white truncate">
-                            {agent.name}
-                          </h3>
-                          <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">
-                            {agent.role}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Current Activity Box */}
-                      <div className="mt-3.5 pt-3 border-t border-neutral-200/70 dark:border-neutral-800/80">
-                        <p className="text-[11px] text-neutral-600 dark:text-neutral-300 line-clamp-2 leading-relaxed">
-                          {agent.current_activity}
-                        </p>
-                      </div>
-
-                      {/* Workstation Details Footer */}
-                      <div className="mt-3 flex items-center justify-between text-[10px] text-neutral-400 pt-1">
-                        <span>Click to view details</span>
-                        {isActive ? (
-                          <span className="text-amber-600 dark:text-amber-400 font-bold flex items-center gap-1">
-                            <Sparkles className="w-3 h-3 animate-spin" /> In Flight
-                          </span>
-                        ) : (
-                          <span className="text-emerald-600 dark:text-emerald-400 font-medium">Ready</span>
-                        )}
-                      </div>
-
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Office Floor Plan Legend & Coffee Breakroom Footer */}
-              <div className="mt-6 pt-4 border-t border-neutral-200 dark:border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-neutral-500">
-                <div className="flex items-center gap-4 flex-wrap">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                    <span>Idle / Standby (Reading / Coffee / Chatting)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
-                    <span>Active Processing (Executing Workflow / Tool Call)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
-                    <span>Selected Workstation</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 text-neutral-400">
-                  <Coffee className="w-4 h-4 text-amber-500" />
-                  <span>Breakroom Coffee: Freshly Brewed Espresso ☕</span>
-                </div>
-              </div>
-
-            </div>
+            {/* Architectural Interactive Floor Map */}
+            <OfficeFloorMap
+              agents={agents}
+              recentFlows={flows}
+              containers={containers}
+              monitors={monitors}
+              onSelectAgent={(ag) => setSelectedAgent(ag)}
+              onOpenChat={onOpenChat}
+            />
 
             {/* Selected Agent Workstation Drawer */}
             {selectedAgent && (
               <div className="rounded-2xl bg-white dark:bg-charcoal-dark border border-indigo-200 dark:border-indigo-900 p-6 shadow-sm">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
-                    <span className="text-3xl">{selectedAgent.avatar}</span>
+                    <AvatarCharacter agentId={selectedAgent.id} state={selectedAgent.status || 'idle'} size={56} />
                     <div>
                       <h3 className="text-lg font-serif font-bold text-neutral-900 dark:text-white">
                         {selectedAgent.name}
@@ -379,13 +261,25 @@ export default function OfficeFloor() {
                       </p>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedAgent(null)}
-                    className="text-xs text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
-                  >
-                    Close
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {onOpenChat && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenChat(selectedAgent.id)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors flex items-center gap-1.5 shadow-xs"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        <span>Chat</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedAgent(null)}
+                      className="text-xs text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+                    >
+                      Close
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4 pt-4 border-t border-neutral-200 dark:border-neutral-800">

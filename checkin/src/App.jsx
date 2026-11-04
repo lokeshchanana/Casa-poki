@@ -36,7 +36,7 @@ export default function App() {
             <ManagerChat onBackToCheckIn={() => setActiveTab('checkin')} />
           )}
           {activeTab === 'office' && (
-            <OfficeFloor />
+            <OfficeFloor onOpenChat={() => setActiveTab('manager')} />
           )}
         </main>
       </div>
