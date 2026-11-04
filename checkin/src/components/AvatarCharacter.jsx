@@ -7,8 +7,9 @@ import React from 'react';
  */
 export default function AvatarCharacter({
   agentId = 'manager',
-  state = 'idle', // 'idle' | 'active' | 'coffee' | 'chatting' | 'relaxing'
+  state = 'idle', // 'idle' | 'active' | 'coffee' | 'chatting' | 'relaxing' | 'walking'
   size = 56, // pixel diameter
+  facing = 'right', // 'left' | 'right'
   showActionProp = true,
   className = '',
 }) {
@@ -116,6 +117,7 @@ export default function AvatarCharacter({
 
   const p = PERSONA_CONFIGS[agentId] || PERSONA_CONFIGS.manager;
   const isActive = state === 'active';
+  const isWalking = state === 'walking';
   const isCoffee = state === 'coffee';
   const isChatting = state === 'chatting';
   const isRelaxing = state === 'relaxing';
@@ -123,15 +125,22 @@ export default function AvatarCharacter({
   return (
     <div
       className={`relative inline-flex items-center justify-center select-none ${className}`}
-      style={{ width: size, height: size }}
+      style={{
+        width: size,
+        height: isWalking ? size * 1.15 : size,
+        transform: facing === 'left' ? 'scaleX(-1)' : 'none',
+        transition: 'transform 0.2s ease',
+      }}
       title={`${p.name} (${state.toUpperCase()})`}
     >
       {/* SVG Animated Character Vector */}
       <svg
-        viewBox="0 0 100 100"
+        viewBox={isWalking ? "0 0 100 115" : "0 0 100 100"}
         className="w-full h-full drop-shadow-md overflow-visible"
         style={{
-          animation: isActive
+          animation: isWalking
+            ? 'walkBobbing 0.45s ease-in-out infinite'
+            : isActive
             ? 'agentBob 0.6s ease-in-out infinite alternate'
             : 'agentBreathe 3s ease-in-out infinite',
         }}
@@ -159,6 +168,22 @@ export default function AvatarCharacter({
             0% { transform: translateY(0) rotate(-0.5deg); }
             100% { transform: translateY(-2px) rotate(0.5deg); }
           }
+          @keyframes walkBobbing {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-4px); }
+          }
+          @keyframes walkLegLeft {
+            0% { transform: rotate(-24deg); }
+            100% { transform: rotate(24deg); }
+          }
+          @keyframes walkLegRight {
+            0% { transform: rotate(24deg); }
+            100% { transform: rotate(-24deg); }
+          }
+          @keyframes walkArmSwing {
+            0% { transform: rotate(-20deg); }
+            100% { transform: rotate(20deg); }
+          }
           @keyframes agentBlink {
             0%, 88%, 100% { transform: scaleY(1); }
             94% { transform: scaleY(0.1); }
@@ -181,6 +206,22 @@ export default function AvatarCharacter({
             50% { transform: scale(1.1); opacity: 1; }
           }
         `}</style>
+
+        {/* Walking Legs (visible when walking) */}
+        {isWalking && (
+          <g id="walking_legs">
+            {/* Left Leg */}
+            <g style={{ transformOrigin: '38px 88px', animation: 'walkLegLeft 0.45s infinite alternate ease-in-out' }}>
+              <rect x="33" y="88" width="9" height="20" rx="3" fill="#1E293B" />
+              <ellipse cx="36" cy="108" rx="6.5" ry="3.5" fill="#0F172A" />
+            </g>
+            {/* Right Leg */}
+            <g style={{ transformOrigin: '58px 88px', animation: 'walkLegRight 0.45s infinite alternate ease-in-out' }}>
+              <rect x="54" y="88" width="9" height="20" rx="3" fill="#1E293B" />
+              <ellipse cx="58" cy="108" rx="6.5" ry="3.5" fill="#0F172A" />
+            </g>
+          </g>
+        )}
 
         {/* 1. Body / Shoulders & Torso */}
         <g id="torso">
@@ -431,6 +472,18 @@ export default function AvatarCharacter({
                   strokeLinecap="round"
                   style={{ animation: 'steamRise 2s infinite ease-out 0.8s' }}
                 />
+              </g>
+            )}
+
+            {/* Walking Arm / Folder Prop */}
+            {isWalking && (
+              <g id="walking_prop" transform="translate(64, 62)">
+                <g style={{ transformOrigin: '0px 0px', animation: 'walkArmSwing 0.45s infinite alternate ease-in-out' }}>
+                  <rect x="2" y="6" width="14" height="18" rx="2" fill="#D97706" stroke="#92400E" strokeWidth="1" />
+                  <line x1="5" y1="11" x2="13" y2="11" stroke="#FFFFFF" strokeWidth="1.5" />
+                  <line x1="5" y1="15" x2="11" y2="15" stroke="#FFFFFF" strokeWidth="1" />
+                  <circle cx="1" cy="14" r="4" fill={p.skinTone} />
+                </g>
               </g>
             )}
 
