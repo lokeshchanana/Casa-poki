@@ -20,6 +20,7 @@ from state_store import (
     get_system_summary,
     init_store,
 )
+import vector_memory
 from webhooks import handle_open_house_sign_in, handle_website_contact
 
 app = FastAPI(title="Multi-Agent Manager Hub (Manager + IT + Auditor)")
@@ -48,9 +49,23 @@ class HealRequest(BaseModel):
     container_name: str
 
 
+class MemoryStoreRequest(BaseModel):
+    agent_id: str = "manager"
+    content: str
+    category: str = "domain_knowledge"
+
+
+class MemoryQueryRequest(BaseModel):
+    query: str
+    agent_id: Optional[str] = None
+    category: Optional[str] = None
+    top_k: Optional[int] = 4
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_store()
+    vector_memory.init_vector_memory_db()
 
 
 @app.get("/api/manager/health")
@@ -109,6 +124,38 @@ def remove_lesson(lesson_id: int) -> dict:
     if not deleted:
         raise HTTPException(status_code=404, detail="Lesson not found")
     return {"ok": True}
+
+
+# =============================================================================
+# Vector Memory Database Endpoints
+# =============================================================================
+
+@app.get("/api/manager/memory/stats")
+def memory_stats() -> dict:
+    return vector_memory.get_memory_stats()
+
+
+@app.post("/api/manager/memory/store")
+def memory_store(req: MemoryStoreRequest) -> dict:
+    res = vector_memory.store_memory(
+        agent_id=req.agent_id,
+        content=req.content,
+        category=req.category,
+    )
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("error"))
+    return res
+
+
+@app.post("/api/manager/memory/query")
+def memory_query(req: MemoryQueryRequest) -> dict:
+    matches = vector_memory.query_memories(
+        query=req.query,
+        agent_id=req.agent_id,
+        category=req.category,
+        top_k=req.top_k or 4,
+    )
+    return {"ok": True, "query": req.query, "matches": matches, "count": len(matches)}
 
 
 @app.post("/api/manager/chat")

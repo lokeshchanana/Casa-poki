@@ -31,7 +31,15 @@ export default function OfficeFloor({ onOpenChat }) {
   const [monitors, setMonitors] = useState([]);
   const [selectedFlow, setSelectedFlow] = useState(null);
   const [selectedAgent, setSelectedAgent] = useState(null);
-  const [activeView, setActiveView] = useState('floor'); // 'floor' | 'inspector' | 'telemetry'
+  const [activeView, setActiveView] = useState('floor'); // 'floor' | 'inspector' | 'telemetry' | 'memory'
+  const [memoryStats, setMemoryStats] = useState(null);
+  const [memorySearchQuery, setMemorySearchQuery] = useState('');
+  const [memorySearchResults, setMemorySearchResults] = useState([]);
+  const [memorySearching, setMemorySearching] = useState(false);
+  const [newMemoryAgent, setNewMemoryAgent] = useState('manager');
+  const [newMemoryCategory, setNewMemoryCategory] = useState('domain_knowledge');
+  const [newMemoryContent, setNewMemoryContent] = useState('');
+  const [savingMemory, setSavingMemory] = useState(false);
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [healingContainer, setHealingContainer] = useState(null);
@@ -40,10 +48,11 @@ export default function OfficeFloor({ onOpenChat }) {
   // Fetch all floor and telemetry data
   const refreshData = useCallback(async () => {
     try {
-      const [floorRes, contRes, monRes] = await Promise.all([
+      const [floorRes, contRes, monRes, memRes] = await Promise.all([
         fetch('/api/manager/office/floor-state').then(r => r.json()).catch(() => null),
         fetch('/api/manager/office/containers').then(r => r.json()).catch(() => ({ containers: [] })),
         fetch('/api/manager/office/monitors').then(r => r.json()).catch(() => ({ monitors: [] })),
+        fetch('/api/manager/memory/stats').then(r => r.json()).catch(() => null),
       ]);
 
       if (floorRes) {
@@ -54,6 +63,7 @@ export default function OfficeFloor({ onOpenChat }) {
       }
       if (contRes?.containers) setContainers(contRes.containers);
       if (monRes?.monitors) setMonitors(monRes.monitors);
+      if (memRes) setMemoryStats(memRes);
     } catch (err) {
       console.error('Failed to fetch office floor state:', err);
     } finally {
@@ -85,6 +95,53 @@ export default function OfficeFloor({ onOpenChat }) {
       alert(`Healing error: ${err.message}`);
     } finally {
       setHealingContainer(null);
+    }
+  };
+
+  const handleSearchMemory = async (e) => {
+    e?.preventDefault();
+    if (!memorySearchQuery.trim()) return;
+    setMemorySearching(true);
+    try {
+      const res = await fetch('/api/manager/memory/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: memorySearchQuery.trim(), top_k: 6 }),
+      });
+      const data = await res.json();
+      setMemorySearchResults(data.matches || []);
+    } catch (err) {
+      alert(`Memory search error: ${err.message}`);
+    } finally {
+      setMemorySearching(false);
+    }
+  };
+
+  const handleSaveMemory = async (e) => {
+    e?.preventDefault();
+    if (!newMemoryContent.trim()) return;
+    setSavingMemory(true);
+    try {
+      const res = await fetch('/api/manager/memory/store', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent_id: newMemoryAgent,
+          category: newMemoryCategory,
+          content: newMemoryContent.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) alert(`Store failed: ${data.detail || data.error}`);
+      else {
+        alert('Memory vectorized and stored in SQLite-vec brain!');
+        setNewMemoryContent('');
+        refreshData();
+      }
+    } catch (err) {
+      alert(`Store error: ${err.message}`);
+    } finally {
+      setSavingMemory(false);
     }
   };
 
@@ -196,6 +253,23 @@ export default function OfficeFloor({ onOpenChat }) {
               >
                 <Server className="w-3.5 h-3.5 text-emerald-500" />
                 <span>Guardian Telemetry</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveView('memory')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  activeView === 'memory'
+                    ? 'bg-white dark:bg-charcoal-dark text-neutral-900 dark:text-white shadow-sm'
+                    : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100'
+                }`}
+              >
+                <Database className="w-3.5 h-3.5 text-purple-500" />
+                <span>Vector Brain</span>
+                {memoryStats?.total_memories > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300">
+                    {memoryStats.total_memories}
+                  </span>
+                )}
               </button>
             </div>
 
@@ -678,6 +752,163 @@ export default function OfficeFloor({ onOpenChat }) {
                     </div>
                   );
                 })}
+              </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* VIEW 4: AGENT VECTOR MEMORY BRAIN */}
+        {activeView === 'memory' && (
+          <div className="flex flex-col gap-6">
+            
+            {/* Memory Header & Summary Stats */}
+            <div className="rounded-2xl bg-white dark:bg-charcoal-dark border border-neutral-200 dark:border-neutral-800 p-6 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-200 dark:border-neutral-800 pb-4 mb-6">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400">
+                      <Database className="w-5 h-5" />
+                    </span>
+                    <h3 className="text-lg font-serif font-bold text-neutral-900 dark:text-white">
+                      Agent Vector Memory Database (agent_memory.db)
+                    </h3>
+                  </div>
+                  <p className="text-xs text-neutral-500 mt-1">
+                    Powered by sqlite-vec and FastEmbed (BAAI/bge-small-en-v1.5, 384 dims). Enables persistent institutional memory, comp retrieval, and continuous self-improvement across delegations.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-4 text-xs">
+                  <div className="px-3 py-1.5 rounded-xl bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800">
+                    <span className="text-neutral-500 dark:text-neutral-400">Total Memories:</span>{' '}
+                    <strong className="text-purple-700 dark:text-purple-300 font-mono text-sm">{memoryStats?.total_memories || 0}</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Vector Query Explorer */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                
+                {/* Search Box */}
+                <div className="flex flex-col gap-4">
+                  <h4 className="font-bold text-sm text-neutral-900 dark:text-white flex items-center gap-2">
+                    <Search className="w-4 h-4 text-purple-500" />
+                    <span>Semantic Similarity Search</span>
+                  </h4>
+                  <form onSubmit={handleSearchMemory} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={memorySearchQuery}
+                      onChange={(e) => setMemorySearchQuery(e.target.value)}
+                      placeholder="e.g. Somerset view home price, container healing rule..."
+                      className="flex-1 px-3 py-2 rounded-xl text-xs bg-neutral-50 dark:bg-charcoal border border-neutral-300 dark:border-neutral-700 focus:outline-hidden focus:ring-2 focus:ring-purple-500"
+                    />
+                    <button
+                      type="submit"
+                      disabled={memorySearching}
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white transition-colors flex items-center gap-1.5 shadow-xs"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>{memorySearching ? 'Searching...' : 'Vector Match'}</span>
+                    </button>
+                  </form>
+
+                  {/* Results List */}
+                  <div className="flex flex-col gap-2.5 mt-2">
+                    {memorySearchResults.length === 0 ? (
+                      <div className="text-xs text-neutral-400 p-4 border border-dashed border-neutral-200 dark:border-neutral-800 rounded-xl text-center">
+                        Enter a natural language query above to test real-time vector matching.
+                      </div>
+                    ) : (
+                      memorySearchResults.map((m) => (
+                        <div
+                          key={m.id}
+                          className="p-3 rounded-xl bg-neutral-50 dark:bg-charcoal border border-neutral-200 dark:border-neutral-800 text-xs flex flex-col gap-1"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold uppercase tracking-wider text-[10px] text-purple-600 dark:text-purple-400">
+                              [{m.agent_id}] • {m.category}
+                            </span>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold">
+                              {Math.round(m.similarity * 100)}% Match
+                            </span>
+                          </div>
+                          <p className="text-neutral-700 dark:text-neutral-300 font-medium">
+                            {m.content}
+                          </p>
+                          <span className="text-[9px] text-neutral-400">
+                            Recorded: {m.created_at} • Distance: {m.distance}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Teach New Vector Fact / Memory Form */}
+                <div className="flex flex-col gap-4 border-t lg:border-t-0 lg:border-l border-neutral-200 dark:border-neutral-800 lg:pl-6 pt-4 lg:pt-0">
+                  <h4 className="font-bold text-sm text-neutral-900 dark:text-white flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-indigo-500" />
+                    <span>Teach Knowledge into Vector Brain</span>
+                  </h4>
+                  <form onSubmit={handleSaveMemory} className="flex flex-col gap-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] text-neutral-500 block mb-1">Target Specialist</label>
+                        <select
+                          value={newMemoryAgent}
+                          onChange={(e) => setNewMemoryAgent(e.target.value)}
+                          className="w-full px-2.5 py-1.5 rounded-lg text-xs bg-neutral-50 dark:bg-charcoal border border-neutral-300 dark:border-neutral-700"
+                        >
+                          <option value="manager">Marcus Vance (Manager)</option>
+                          <option value="cma">Carter Hayes (CMA / Comps)</option>
+                          <option value="it">Ian Torres (IT / DevOps)</option>
+                          <option value="auditor">Audrey Chen (Auditor)</option>
+                          <option value="intake">Miles Miller (Intake)</option>
+                          <option value="finance">Fiona Banks (Finance)</option>
+                          <option value="marketing">Maya Reyes (Marketing)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] text-neutral-500 block mb-1">Knowledge Category</label>
+                        <select
+                          value={newMemoryCategory}
+                          onChange={(e) => setNewMemoryCategory(e.target.value)}
+                          className="w-full px-2.5 py-1.5 rounded-lg text-xs bg-neutral-50 dark:bg-charcoal border border-neutral-300 dark:border-neutral-700"
+                        >
+                          <option value="domain_knowledge">Domain Knowledge</option>
+                          <option value="market_intelligence">Market Intelligence</option>
+                          <option value="operational_rule">Operational Rule</option>
+                          <option value="client_preference">Client Preference</option>
+                          <option value="past_resolution">Past Resolution Pattern</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] text-neutral-500 block mb-1">Fact / Resolution to Vectorize</label>
+                      <textarea
+                        rows={4}
+                        value={newMemoryContent}
+                        onChange={(e) => setNewMemoryContent(e.target.value)}
+                        placeholder="e.g. When client asks for waterfront homes in Kirkland, check Lake Washington parcel setback rules..."
+                        className="w-full px-3 py-2 rounded-xl text-xs bg-neutral-50 dark:bg-charcoal border border-neutral-300 dark:border-neutral-700 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={savingMemory}
+                      className="self-end px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition-colors flex items-center gap-1.5 shadow-xs"
+                    >
+                      <Database className="w-3.5 h-3.5" />
+                      <span>{savingMemory ? 'Vectorizing...' : 'Store in Vector Memory'}</span>
+                    </button>
+                  </form>
+                </div>
+
               </div>
             </div>
 

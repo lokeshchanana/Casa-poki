@@ -24,6 +24,7 @@ from state_store import (
     update_audit_status,
 )
 from tools import TOOL_SCHEMAS, execute_tool, format_tool_result
+import vector_memory
 
 logger = logging.getLogger("agent_orchestrator")
 
@@ -36,20 +37,79 @@ DEFAULT_TASK_BUDGET = int(os.environ.get("TASK_TOKEN_BUDGET", "32000"))
 # Modern Multi-Agent Prompts
 # =============================================================================
 
-MANAGER_SYSTEM_PROMPT = """You are the Central Manager Agent for Lokesh Chanana Real Estate and Casa-poki.
-You have access to a suite of tools to manage Twenty CRM (contacts, tasks, notes, deals) and inspect n8n automation workflows.
+# =============================================================================
+# Modern Multi-Agent Prompts & Persona Specializations
+# =============================================================================
+
+SPECIALIST_PERSONAS = {
+    "manager": {
+        "name": "Marcus Vance",
+        "role": "General Manager & Orchestrator",
+        "system_prompt": """You are Marcus Vance, General Manager & Orchestrator for Lokesh Chanana Real Estate and Casa-poki.
+You focus on overall business triage, client communications, and orchestrating work across specialist agents.
+DELEGATION POLICY:
+- If a task requires IT infrastructure, server container healing, or technical database repairs, delegate to 'it'.
+- If a task requires market comps, CMA, valuation, or MLS analytics, delegate to 'cma'.
+- If a task requires marketing copy, listing flyers, or open house announcements, delegate to 'marketing'.
+- If a task requires financial accounting, ledger statements, or transaction fee calculations, delegate to 'finance'.
+- If a task requires client visitor intake or open house sign-in management, delegate to 'intake'.
+- You have tools to manage Twenty CRM directly, query/store vector memory, or delegate to any specialist.""",
+    },
+    "it": {
+        "name": "Ian Torres",
+        "role": "IT Systems & Infrastructure Guardian",
+        "system_prompt": """You are Ian Torres, IT Systems & Infrastructure Guardian for Casa-poki.
+You focus on Docker containers, system self-healing, Uptime Kuma monitors, database connectivity, and backend tool reliability.
+You provide technical precision and operational integrity.""",
+    },
+    "auditor": {
+        "name": "Audrey Chen",
+        "role": "Quality Assurance & Compliance Auditor",
+        "system_prompt": """You are Audrey Chen, Quality Assurance & Compliance Auditor for Casa-poki.
+You verify outputs, enforce the strict Zero Stray Communications policy, ensure no hallucinations, and log preventative lessons.""",
+    },
+    "intake": {
+        "name": "Miles Miller",
+        "role": "Client Intake & Communications",
+        "system_prompt": """You are Miles Miller, Client Intake Specialist.
+You focus on Open House check-ins, visitor inquiries, prompt CRM lead capture, and greeting new clients with warmth and accuracy.""",
+    },
+    "finance": {
+        "name": "Fiona Banks",
+        "role": "Financial Controller & Budget Specialist",
+        "system_prompt": """You are Fiona Banks, Financial Controller for Casa-poki.
+You focus on budget actuals, transaction balances, escrow ledgers, and revenue accounting.""",
+    },
+    "marketing": {
+        "name": "Maya Reyes",
+        "role": "Creative Director & Listing Promotions",
+        "system_prompt": """You are Maya Reyes, Creative Director for Lokesh Chanana Real Estate.
+You focus on high-impact property marketing, neighborhood highlights, open house flyers, and compelling real estate storytelling.""",
+    },
+    "cma": {
+        "name": "Carter Hayes",
+        "role": "Real Estate Analyst & CMA Specialist",
+        "system_prompt": """You are Carter Hayes, Real Estate Market Analyst & CMA Specialist.
+You focus on Northwest MLS comparables, King County parcel pricing, school district impacts, and accurate valuation modeling.""",
+    },
+}
+
+MANAGER_SYSTEM_PROMPT = """You are Marcus Vance, Central Manager Agent for Lokesh Chanana Real Estate and Casa-poki.
+You have access to a suite of tools to manage Twenty CRM (contacts, tasks, notes, deals), inspect automations, store/query vector memory, and delegate to specialist agents.
 
 CORE CAPABILITIES & GUIDELINES:
-1. Tool Invocation:
-   - When the user instructs you to search, view, count, create, update, or delete contacts, tasks, or notes in the CRM, invoke the appropriate tool from your tools list.
+1. Tool Invocation & Delegation:
+   - When the user asks to consult, ask, or assign a task to another specialist (such as Carter Hayes for CMA/valuation, Maya Reyes for marketing, Fiona Banks for finance, Miles Miller for intake, Ian Torres for IT), invoke `delegate_to_agent` with target_agent and task_description.
+   - When the user instructs you to search, view, count, create, update, or delete contacts, tasks, or notes in Twenty CRM, invoke the appropriate CRM tool.
    - For queries like "How many people...", use `search_contacts` with `count_mode: true` and appropriate filters (`can_email`, `phone_blank`, `email_present`).
-   - Tolerate minor typos in user requests (e.g. "is there a use Lokesh" -> search for "Lokesh", "add a not for user X" -> manage_notes).
+   - Before answering complex questions or market inquiries, invoke `query_memory` to check the Vector Database for stored insights or past resolutions.
+   - Store valuable lessons, client preferences, or domain facts with `store_memory` so the team gets continuously better.
 2. Capability Inquiries vs. Actions:
-   - If the user asks a question about what you can do (e.g. "So you can't update any contacts?", "Can you update contacts?"), DO NOT invoke an empty update tool. Instead, answer directly in natural language, explaining your capabilities and detailing what parameters are needed (e.g. contact name/ID and the fields to change).
+   - If the user asks a question about what you can do (e.g. "Can you update contacts?"), answer directly in natural language explaining your capabilities and needed parameters.
 3. Zero Stray Communications (STRICT SAFETY):
    - All production services are live. Never generate random or fake contact emails/phones. Only verified owner contact details (lokeshchanana@gmail.com / 8018601052) may be used for testing.
 4. Response Tone:
-   - Professional, concise, executive, and direct. Deliver clear answers without verbose filler.
+   - Professional, concise, executive, and direct.
 """
 
 AUDITOR_SYSTEM_PROMPT = """You are the Auditor Agent for Casa-poki and Lokesh Chanana Real Estate.
@@ -99,7 +159,7 @@ async def call_llm_chat(
         payload["tools"] = tools
 
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=180.0) as client:
             resp = await client.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -159,6 +219,9 @@ async def run_multi_agent_pipeline(
     start_time = time.time()
     tokens_used = 0
     trace_steps: List[Dict[str, Any]] = []
+    invoked_tool_name: Optional[str] = None
+    invoked_tool_args: Optional[Dict[str, Any]] = None
+    tool_result: Optional[Dict[str, Any]] = None
 
     def emit(event_type: str, data: Dict[str, Any]) -> str:
         return json.dumps({"type": event_type, "task_id": task_id, **data}) + "\n"
@@ -270,15 +333,25 @@ async def run_multi_agent_pipeline(
         return
 
     # -------------------------------------------------------------------------
-    # Main Agent Reasoner: Multi-Turn Context + Native Tool Calling
+    # Main Agent Reasoner: Vector Memory Retrieval + Native Multi-Agent Triage
     # -------------------------------------------------------------------------
+    # 1. Retrieve relevant memories from the Vector Database
+    recalled_memories = vector_memory.query_memories(query=user_message, top_k=3)
+    memory_context_block = ""
+    if recalled_memories:
+        memory_lines = [
+            f"- [{m['agent_id'].upper()}] {m['content']} (relevance: {int(m['similarity']*100)}%)"
+            for m in recalled_memories
+        ]
+        memory_context_block = "\nRelevant Vector Memories from Brain:\n" + "\n".join(memory_lines) + "\n"
+
     # Load historical context
     history = get_chat_history(session_id, limit=6)
     lessons = [l["rule"] for l in get_lessons()[:8]]
     lessons_block = ("\nActive Lessons:\n" + "\n".join(f"- {r}" for r in lessons)) if lessons else ""
 
     messages = [
-        {"role": "system", "content": MANAGER_SYSTEM_PROMPT + lessons_block},
+        {"role": "system", "content": MANAGER_SYSTEM_PROMPT + lessons_block + memory_context_block},
     ]
     for h in history:
         messages.append({"role": h["role"], "content": h["content"]})
@@ -311,6 +384,9 @@ async def run_multi_agent_pipeline(
             except Exception:
                 args = {}
 
+        invoked_tool_name = tool_name
+        invoked_tool_args = args
+
         # Fallback check for query typos (e.g. "use Lokesh" -> "Lokesh")
         if tool_name == "search_contacts" and "query" in args:
             args["query"] = re.sub(r"^(is there a |does a |find |search |use |user )", "", str(args["query"]), flags=re.I).strip()
@@ -340,14 +416,78 @@ async def run_multi_agent_pipeline(
         trace_steps.append(step1_trace)
         yield emit("agent_trace", {"trace": step1_trace})
 
-        # Execute Tool via IT Gateway
-        tool_result = await execute_tool(tool_name, args)
-        formatted_result = format_tool_result(tool_name, tool_result, args)
+        # Special Handling: Dynamic Inter-Agent Delegation
+        if tool_name == "delegate_to_agent":
+            target_agent = args.get("target_agent", "manager").lower()
+            task_desc = args.get("task_description", "")
+            context_data = args.get("context_data", "")
+
+            specialist_info = SPECIALIST_PERSONAS.get(target_agent, SPECIALIST_PERSONAS["manager"])
+            specialist_name = specialist_info["name"]
+
+            yield emit(
+                "agent_status",
+                {
+                    "agent": target_agent,
+                    "phase": "specialist_working",
+                    "message": f"{specialist_name} ({specialist_info['role']}) is executing delegated task...",
+                },
+            )
+
+            # Retrieve specialist vector memory for this task
+            spec_memories = vector_memory.query_memories(query=task_desc, agent_id=target_agent, top_k=2)
+            spec_mem_str = "\n".join(f"- {m['content']}" for m in spec_memories) if spec_memories else "None"
+
+            specialist_messages = [
+                {
+                    "role": "system",
+                    "content": f"{specialist_info['system_prompt']}\nRelevant Domain Knowledge:\n{spec_mem_str}\nProvide a direct, high-value, professional response.",
+                },
+                {
+                    "role": "user",
+                    "content": f"Task: {task_desc}\nContext: {context_data}",
+                },
+            ]
+
+            spec_resp = await call_llm_chat(
+                task_id=task_id,
+                agent_name=target_agent,
+                messages=specialist_messages,
+                tools=None,
+                max_tokens=800,
+                temperature=0.2,
+            )
+            tokens_used += spec_resp["metrics"]["total_tokens"]
+            specialist_output = spec_resp["content"]
+
+            tool_result = {
+                "ok": True,
+                "tool": "delegate_to_agent",
+                "target_agent": target_agent,
+                "specialist_name": specialist_name,
+                "response": specialist_output,
+                "duration_ms": spec_resp["metrics"]["duration_ms"],
+            }
+            formatted_result = (
+                f"### Delegated Response from {specialist_name} ({specialist_info['role']})\n\n"
+                f"{specialist_output}"
+            )
+
+            # Auto-save successful resolution into Vector Memory for self-improvement
+            vector_memory.store_memory(
+                agent_id=target_agent,
+                content=f"Resolution for task '{task_desc[:120]}': {specialist_output[:300]}",
+                category="past_resolution",
+            )
+        else:
+            # Execute Standard Tool via Gateway
+            tool_result = await execute_tool(tool_name, args)
+            formatted_result = format_tool_result(tool_name, tool_result, args)
 
         step2_trace = {
             "step": 2,
-            "agent": "IT Agent",
-            "role": "Tool Execution Gateway",
+            "agent": specialist_name if tool_name == "delegate_to_agent" else "IT Agent",
+            "role": f"Specialist ({specialist_info['role']})" if tool_name == "delegate_to_agent" else "Tool Execution Gateway",
             "result": {
                 "tool": tool_name,
                 "status": "SUCCESS" if tool_result.get("ok", True) else "FAILED",
@@ -409,6 +549,16 @@ async def run_multi_agent_pipeline(
 
         # Log request flow for the Virtual Office Floor Inspector
         try:
+            delegated_agent_name = (
+                SPECIALIST_PERSONAS.get(args.get("target_agent", ""), {}).get("name")
+                if tool_name == "delegate_to_agent"
+                else None
+            )
+            agents_in_flow = ["Marcus Vance"]
+            if delegated_agent_name:
+                agents_in_flow.append(delegated_agent_name)
+            agents_in_flow.append("Audrey Chen")
+
             steps_summary = [
                 {
                     "step": "Planning & Orchestration",
@@ -418,9 +568,9 @@ async def run_multi_agent_pipeline(
                     "status": "ok",
                 },
                 {
-                    "step": f"Tool Execution ({tool_name})",
-                    "agent": "Marcus Vance",
-                    "action": f"Executed tool `{tool_name}` with parameters: {json.dumps(args)[:120]}",
+                    "step": f"Delegated Execution ({tool_name})" if delegated_agent_name else f"Tool Execution ({tool_name})",
+                    "agent": delegated_agent_name or "Marcus Vance",
+                    "action": f"Executed `{tool_name}`: {json.dumps(args)[:120]}",
                     "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                     "status": "ok" if (tool_result or {}).get("ok", True) else "warning",
                 },
@@ -437,7 +587,7 @@ async def run_multi_agent_pipeline(
                 source="Manager Chat UI",
                 title=f"Chat: {user_message[:50]}",
                 status="completed" if audit_ok else "warning",
-                agents_involved=["Marcus Vance", "Audrey Chen"],
+                agents_involved=agents_in_flow,
                 steps=steps_summary,
                 payload_preview={"input": user_message, "tool": tool_name, "args": args},
                 result_summary=formatted_result[:140],

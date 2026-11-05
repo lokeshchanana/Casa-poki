@@ -168,7 +168,8 @@ Casa-poki relies on native, block-level ZFS replication to a dedicated secondary
 - **`ai/n8n`** (`ai/n8n/`):
   - Advanced node-based workflow automation engine connecting CRM instances, marketing platforms, and AI APIs.
 - **`agents`** (`agents/`):
-  - Autonomous agent hub coordinating background tool runs and database synchronization.
+  - Autonomous Multi-Agent Hub featuring 7 specialist personas (Manager, IT, Auditor, Intake, Finance, Marketing, CMA).
+  - Equipped with embedded `sqlite-vec` vector memory engine and FastEmbed (`BAAI/bge-small-en-v1.5`) for semantic knowledge retrieval, autonomous inter-agent delegation, and continuous learning.
 - **`ollama`** (`ollama/`):
   - Local GPU/CPU neural network inference server hosting private language models for CRM categorization and extraction.
 

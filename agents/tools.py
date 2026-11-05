@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from n8n_catalog import N8N_BASE_URL, get_n8n_workflows
+import vector_memory
 
 logger = logging.getLogger("agent_tools")
 
@@ -237,17 +238,73 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "inspect_n8n_workflows",
-            "description": "Inspect active automation workflows in n8n to check system capabilities.",
+            "name": "delegate_to_agent",
+            "description": "Delegate a task, specialized analysis, or follow-up to another Casa-poki agent persona. Available target agents: 'manager', 'it', 'auditor', 'intake', 'finance', 'marketing', 'cma'.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "domain": {
+                    "target_agent": {
                         "type": "string",
-                        "description": "Optional domain filter (e.g. 'crm', 'marketing', 'finance')",
-                    }
+                        "enum": ["manager", "it", "auditor", "intake", "finance", "marketing", "cma"],
+                        "description": "The specialist agent to delegate this task to",
+                    },
+                    "task_description": {
+                        "type": "string",
+                        "description": "Detailed description of what the delegated specialist should do and return",
+                    },
+                    "context_data": {
+                        "type": "string",
+                        "description": "Optional context, data, or contact IDs needed for the sub-task",
+                    },
                 },
-                "required": [],
+                "required": ["target_agent", "task_description"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "store_memory",
+            "description": "Store domain knowledge, market facts, client preferences, or operational resolutions into the persistent Vector Database.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "The exact fact, insight, rule, or resolution knowledge to vectorize and store",
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["domain_knowledge", "market_intelligence", "operational_rule", "client_preference", "past_resolution"],
+                        "description": "Category tag for the memory",
+                    },
+                },
+                "required": ["content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_memory",
+            "description": "Perform semantic similarity search on the Vector Database to retrieve past resolutions, domain specs, rules, and market comps.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural language question or search query for vector lookup",
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Optional category filter",
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Number of top matching memories to retrieve (default 3)",
+                    },
+                },
+                "required": ["query"],
             },
         },
     },
@@ -600,6 +657,29 @@ async def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             "duration_ms": int((time.time() - start_ts) * 1000),
         }
 
+    if name == "store_memory":
+        agent_id = args.get("agent_id") or "system"
+        content = args.get("content") or ""
+        cat = args.get("category") or "domain_knowledge"
+        res = vector_memory.store_memory(agent_id=agent_id, content=content, category=cat)
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
+    if name == "query_memory":
+        q = args.get("query") or ""
+        agent_id = args.get("agent_id")
+        cat = args.get("category")
+        top_k = args.get("top_k") or 3
+        matches = vector_memory.query_memories(query=q, agent_id=agent_id, category=cat, top_k=top_k)
+        return {
+            "ok": True,
+            "tool": name,
+            "query": q,
+            "matches": matches,
+            "total_matches": len(matches),
+            "duration_ms": int((time.time() - start_ts) * 1000),
+        }
+
     # Direct Twenty CRM Handlers
     try:
         if name == "search_contacts":
@@ -783,5 +863,34 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
         for w in active:
             lines.append(f"- **{w['name']}** (`{w['id']}`) [Domain: `{w.get('domain')}`]")
         return "\n".join(lines)
+
+    if tool_name == "store_memory":
+        return (
+            f"### Vector Memory Saved\n"
+            f"- **Memory ID:** `{result.get('memory_id')}`\n"
+            f"- **Category:** `{result.get('category')}`\n"
+            f"- **Content:** {result.get('content')}\n"
+            f"- Vectorized with 384-dimensional embeddings in `agent_memory.db`."
+        )
+
+    if tool_name == "query_memory":
+        matches = result.get("matches") or []
+        if not matches:
+            return f"### Vector Memory Search (`{result.get('query')}`)\nNo semantically similar memories found."
+        lines = [f"### Vector Memory Recall (`{len(matches)}` matching entries for '{result.get('query')}')\n"]
+        for m in matches:
+            lines.append(
+                f"- **[{m.get('agent_id').upper()} • {m.get('category')}]** (Similarity: {int(m.get('similarity', 0)*100)}%)\n"
+                f"  {m.get('content')}"
+            )
+        return "\n".join(lines)
+
+    if tool_name == "delegate_to_agent":
+        return (
+            f"### Task Delegated\n"
+            f"- **Target Specialist:** `{args.get('target_agent')}`\n"
+            f"- **Task:** {args.get('task_description')}\n"
+            f"- **Result:** {result.get('response', 'Completed delegation')}"
+        )
 
     return f"```json\n{json.dumps(result, indent=2)}\n```"
