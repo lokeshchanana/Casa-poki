@@ -21,7 +21,12 @@ from state_store import (
     init_store,
 )
 import vector_memory
-from webhooks import handle_open_house_sign_in, handle_website_contact
+from webhooks import (
+    handle_bill_intake,
+    handle_open_house_sign_in,
+    handle_payment_intake,
+    handle_website_contact,
+)
 
 app = FastAPI(title="Multi-Agent Manager Hub (Manager + IT + Auditor)")
 
@@ -217,3 +222,23 @@ async def webhook_brevo_sync(req: Request) -> JSONResponse:
 @app.post("/webhook/brevo-event-webhook")
 async def webhook_brevo_event(req: Request) -> JSONResponse:
     return JSONResponse(content={"ok": True, "message": "Brevo event acknowledged by Agent Hub."})
+
+
+@app.post("/webhook/bill-intake")
+async def webhook_bill_intake(req: Request) -> JSONResponse:
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    result = await handle_bill_intake(body)
+    return JSONResponse(content=result)
+
+
+@app.post("/webhook/payment-intake")
+async def webhook_payment_intake(req: Request) -> JSONResponse:
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    result = await handle_payment_intake(body)
+    return JSONResponse(content=result)

@@ -76,9 +76,16 @@ You focus on Open House check-ins, visitor inquiries, prompt CRM lead capture, a
     },
     "finance": {
         "name": "Fiona Banks",
-        "role": "Financial Controller & Budget Specialist",
-        "system_prompt": """You are Fiona Banks, Financial Controller for Casa-poki.
-You focus on budget actuals, transaction balances, escrow ledgers, and revenue accounting.""",
+        "role": "Financial Controller & Bigcapital Manager",
+        "system_prompt": """You are Fiona Banks, Financial Controller for Casa-poki and Lokesh Chanana Real Estate.
+You manage all financial accounting through Bigcapital hosted at https://finance.lokeshchanana.com.
+You have direct tools to:
+- Record incoming bills and invoices (`finance_record_bill`)
+- Settle and record bill payments (`finance_record_payment`)
+- Audit bills, open balances, and due dates (`finance_list_bills`, `finance_dashboard`)
+- Ingest batches of historical bills and receipts (`finance_import_historical_bills`)
+Whenever the user or an incoming email/message presents a bill or payment, extract the vendor, amount, due date, category, and record it into Bigcapital.
+When asked about finances, summarize accounts payable, upcoming due bills, and provide the portal link https://finance.lokeshchanana.com.""",
     },
     "marketing": {
         "name": "Maya Reyes",
@@ -449,16 +456,47 @@ async def run_multi_agent_pipeline(
                 },
             ]
 
+            spec_tools = (
+                [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("finance_")]
+                if target_agent == "finance"
+                else None
+            )
+
             spec_resp = await call_llm_chat(
                 task_id=task_id,
                 agent_name=target_agent,
                 messages=specialist_messages,
-                tools=None,
+                tools=spec_tools,
                 max_tokens=800,
                 temperature=0.2,
             )
             tokens_used += spec_resp["metrics"]["total_tokens"]
             specialist_output = spec_resp["content"]
+
+            # If specialist invoked tools autonomously, execute and synthesize response
+            if spec_resp.get("tool_calls"):
+                fn_formatted = ""
+                for t_call in spec_resp["tool_calls"]:
+                    fn_data = t_call.get("function", {})
+                    fn_name = fn_data.get("name")
+                    fn_args = fn_data.get("arguments", {})
+                    fn_res = await execute_tool(fn_name, fn_args)
+                    fn_formatted = format_tool_result(fn_name, fn_res, fn_args)
+                    specialist_messages.append({"role": "assistant", "content": "", "tool_calls": [t_call]})
+                    specialist_messages.append({"role": "tool", "content": json.dumps(fn_res)})
+
+                spec_turn2 = await call_llm_chat(
+                    task_id=task_id,
+                    agent_name=target_agent,
+                    messages=specialist_messages,
+                    tools=None,
+                    max_tokens=800,
+                    temperature=0.2,
+                )
+                tokens_used += spec_turn2["metrics"]["total_tokens"]
+                specialist_output = spec_turn2["content"]
+                if fn_formatted and fn_formatted not in specialist_output:
+                    specialist_output = f"{fn_formatted}\n\n{specialist_output}"
 
             tool_result = {
                 "ok": True,

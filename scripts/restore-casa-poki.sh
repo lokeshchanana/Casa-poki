@@ -134,7 +134,7 @@ fi
 # ------------------------------------------------------------------------------
 log_info "Step 5: Verifying and re-linking service secrets from /tank..."
 
-SERVICES=("twenty" "postgres-db" "relaticle" "monitor" "mic-bridge" "cloudflared" "agents")
+SERVICES=("twenty" "postgres-db" "relaticle" "monitor" "mic-bridge" "cloudflared" "agents" "bigcapital")
 
 for s in "${SERVICES[@]}"; do
   if [ -f "/tank/${s}/.env" ]; then
@@ -220,6 +220,7 @@ COMPOSE_DIRS=(
   "real-estate"
   "checkin"
   "agents"
+  "bigcapital"
 )
 
 for d in "${COMPOSE_DIRS[@]}"; do

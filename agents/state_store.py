@@ -765,11 +765,11 @@ OFFICE_PERSONAS = [
     {
         "id": "finance",
         "name": "Fiona Banks",
-        "role": "Financial Controller & Actual Budget",
-        "station": "Ledger & Statements Desk",
+        "role": "Financial Controller & Bigcapital Manager",
+        "station": "Ledger & Financial Controller Desk",
         "avatar": "📊",
         "color": "teal",
-        "default_activity": "Balancing bank statements & ledger reconciliations",
+        "default_activity": "Managing bills, payables, and Bigcapital finances at finance.lokeshchanana.com",
     },
     {
         "id": "marketing",

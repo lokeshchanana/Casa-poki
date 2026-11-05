@@ -29,6 +29,7 @@ MONITOR_TO_CONTAINER_MAP = {
     "local ai inference (ollama)": "ollama",
     "postgresql 17 database": "postgres",
     "adguard home": "adguardhome-adguardhome-1",
+    "bigcapital accounting": "bigcapital-server",
 }
 
 # Protected services that MUST NOT be restarted automatically without manual approval

@@ -369,3 +369,115 @@ async def handle_website_contact(payload: Dict[str, Any]) -> Dict[str, Any]:
         "message": f"Thank you, {name}! Your inquiry has been received.",
         "duration_ms": duration_ms,
     }
+
+
+async def handle_bill_intake(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Inbound webhook for automated bill ingestion (e.g. from n8n email parsers or invoices).
+    Delegates directly to Fiona Banks to record into Bigcapital.
+    """
+    flow_id = f"flow_bill_{int(time.time()*1000)}"
+    start_ts = time.time()
+    steps = []
+
+    vendor = payload.get("vendor") or payload.get("vendor_name") or "Unknown Vendor"
+    amount = float(payload.get("amount", 0.0))
+    due_date = payload.get("due_date")
+    bill_date = payload.get("bill_date")
+    category = payload.get("category", "General")
+    reference_no = payload.get("reference_no") or payload.get("invoice_no")
+    note = payload.get("note") or payload.get("description")
+
+    steps.append({
+        "step": "Bill Intake Trigger",
+        "agent": "Fiona Banks",
+        "action": f"Received incoming bill from {vendor} for ${amount:,.2f}",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "status": "ok",
+    })
+
+    from bigcapital_tools import bigcapital_client
+    creation = await bigcapital_client.create_bill(
+        vendor_name=vendor,
+        amount=amount,
+        due_date=due_date,
+        bill_date=bill_date,
+        note=note,
+        reference_no=reference_no,
+        category=category,
+        is_open=True,
+    )
+
+    steps.append({
+        "step": "Bigcapital Posting",
+        "agent": "Fiona Banks",
+        "action": f"Recorded Bill #{creation.get('bill_id')} into Bigcapital",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "status": "ok" if creation.get("ok") else "error",
+    })
+
+    duration_ms = int((time.time() - start_ts) * 1000)
+    log_request_flow(
+        flow_id=flow_id,
+        source="Webhook: /webhook/bill-intake",
+        title=f"Bill Intake: {vendor} (${amount:,.2f})",
+        status="completed" if creation.get("ok") else "failed",
+        agents_involved=["Fiona Banks"],
+        steps=steps,
+        payload_preview=payload,
+        result_summary=creation.get("message", "Bill processed"),
+        duration_ms=duration_ms,
+    )
+    return creation
+
+
+async def handle_payment_intake(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Inbound webhook for automated payment ingestion to settle open bills.
+    """
+    flow_id = f"flow_payment_{int(time.time()*1000)}"
+    start_ts = time.time()
+    steps = []
+
+    bill_id = int(payload.get("bill_id", 0))
+    amount = float(payload.get("amount", 0.0)) if payload.get("amount") else None
+    payment_date = payload.get("payment_date")
+    statement = payload.get("statement") or "Automated Payment Settlement"
+
+    steps.append({
+        "step": "Payment Intake Trigger",
+        "agent": "Fiona Banks",
+        "action": f"Processing settlement for Bill #{bill_id}",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "status": "ok",
+    })
+
+    from bigcapital_tools import bigcapital_client
+    res = await bigcapital_client.record_bill_payment(
+        bill_id=bill_id,
+        amount=amount,
+        payment_date=payment_date,
+        statement=statement,
+    )
+
+    steps.append({
+        "step": "Payment Settled",
+        "agent": "Fiona Banks",
+        "action": f"Recorded payment for Bill #{bill_id}",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "status": "ok" if res.get("ok") else "error",
+    })
+
+    duration_ms = int((time.time() - start_ts) * 1000)
+    log_request_flow(
+        flow_id=flow_id,
+        source="Webhook: /webhook/payment-intake",
+        title=f"Payment Intake: Bill #{bill_id}",
+        status="completed" if res.get("ok") else "failed",
+        agents_involved=["Fiona Banks"],
+        steps=steps,
+        payload_preview=payload,
+        result_summary=res.get("message", "Payment processed"),
+        duration_ms=duration_ms,
+    )
+    return res

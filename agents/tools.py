@@ -8,6 +8,7 @@ import httpx
 
 from n8n_catalog import N8N_BASE_URL, get_n8n_workflows
 import vector_memory
+from bigcapital_tools import bigcapital_client
 
 logger = logging.getLogger("agent_tools")
 
@@ -305,6 +306,138 @@ TOOL_SCHEMAS = [
                     },
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "finance_record_bill",
+            "description": "Record an incoming vendor bill or invoice in Bigcapital accounting (https://finance.lokeshchanana.com). Automatically resolves or creates vendors.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "vendor_name": {
+                        "type": "string",
+                        "description": "Name of the vendor, utility, or supplier (e.g. 'Puget Sound Energy', 'Comcast', 'King County Treasury')",
+                    },
+                    "amount": {
+                        "type": "number",
+                        "description": "Total amount of the bill in USD",
+                    },
+                    "due_date": {
+                        "type": "string",
+                        "description": "Due date in YYYY-MM-DD format (defaults to bill date or today)",
+                    },
+                    "bill_date": {
+                        "type": "string",
+                        "description": "Date bill was issued in YYYY-MM-DD format (defaults to today)",
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Expense category (e.g. 'Utilities', 'Office', 'Software', 'Rent', 'Tax', 'Maintenance')",
+                    },
+                    "reference_no": {
+                        "type": "string",
+                        "description": "Invoice number or billing account reference",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Description, items breakdown, or payment instructions",
+                    },
+                },
+                "required": ["vendor_name", "amount"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "finance_record_payment",
+            "description": "Record a payment or settlement for an open bill in Bigcapital accounting.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bill_id": {
+                        "type": "integer",
+                        "description": "The Bigcapital Bill ID to apply payment towards",
+                    },
+                    "amount": {
+                        "type": "number",
+                        "description": "Payment amount in USD (optional, defaults to remaining bill balance)",
+                    },
+                    "payment_date": {
+                        "type": "string",
+                        "description": "Date payment was processed in YYYY-MM-DD format",
+                    },
+                    "statement": {
+                        "type": "string",
+                        "description": "Payment memo, check number, or bank reference",
+                    },
+                },
+                "required": ["bill_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "finance_list_bills",
+            "description": "Query bills and payables from Bigcapital accounting. Supports viewing open, paid, or overdue bills.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": ["all", "open", "due"],
+                        "description": "Filter bills by status (default: 'all')",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of bills to retrieve (default: 20)",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "finance_dashboard",
+            "description": "Retrieve executive financial overview from Bigcapital: total accounts payable, open bills count, urgent dues, and app status.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "finance_import_historical_bills",
+            "description": "Batch-import historical bills into Bigcapital accounting. Used for backlog ingestion of past invoices and receipts.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bills": {
+                        "type": "array",
+                        "description": "List of historical bill objects with vendor_name, amount, bill_date, due_date, reference_no, note, and is_paid flag",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "vendor_name": {"type": "string"},
+                                "amount": {"type": "number"},
+                                "bill_date": {"type": "string"},
+                                "due_date": {"type": "string"},
+                                "reference_no": {"type": "string"},
+                                "note": {"type": "string"},
+                                "is_paid": {"type": "boolean"},
+                            },
+                            "required": ["vendor_name", "amount"],
+                        },
+                    },
+                },
+                "required": ["bills"],
             },
         },
     },
@@ -680,6 +813,49 @@ async def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             "duration_ms": int((time.time() - start_ts) * 1000),
         }
 
+    # Bigcapital Financial Handlers
+    if name == "finance_record_bill":
+        res = await bigcapital_client.create_bill(
+            vendor_name=args.get("vendor_name", ""),
+            amount=args.get("amount", 0.0),
+            due_date=args.get("due_date"),
+            bill_date=args.get("bill_date"),
+            category=args.get("category"),
+            reference_no=args.get("reference_no"),
+            note=args.get("note"),
+        )
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
+    if name == "finance_record_payment":
+        res = await bigcapital_client.record_bill_payment(
+            bill_id=args.get("bill_id"),
+            amount=args.get("amount"),
+            payment_date=args.get("payment_date"),
+            statement=args.get("statement"),
+        )
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
+    if name == "finance_list_bills":
+        res = await bigcapital_client.list_bills(
+            status=args.get("status"),
+            limit=args.get("limit", 20),
+        )
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
+    if name == "finance_dashboard":
+        res = await bigcapital_client.get_financial_dashboard()
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
+    if name == "finance_import_historical_bills":
+        bills_data = args.get("bills", [])
+        res = await bigcapital_client.import_historical_bills(bills_data)
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
     # Direct Twenty CRM Handlers
     try:
         if name == "search_contacts":
@@ -891,6 +1067,63 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
             f"- **Target Specialist:** `{args.get('target_agent')}`\n"
             f"- **Task:** {args.get('task_description')}\n"
             f"- **Result:** {result.get('response', 'Completed delegation')}"
+        )
+
+    if tool_name == "finance_record_bill":
+        return (
+            f"### 🧾 Bill Recorded in Bigcapital\n"
+            f"- **Bill ID:** `#{result.get('bill_id')}`\n"
+            f"- **Vendor:** **{result.get('vendor_name')}**\n"
+            f"- **Amount:** **${result.get('amount', 0):,.2f} USD**\n"
+            f"- **Bill Date:** `{result.get('bill_date')}` | **Due Date:** `{result.get('due_date')}`\n"
+            f"- **Status:** `{result.get('status')}`\n"
+            f"- **Portal:** [View in Bigcapital](https://finance.lokeshchanana.com)\n\n"
+            f"{result.get('message', '')}"
+        )
+
+    if tool_name == "finance_record_payment":
+        return (
+            f"### 💳 Bill Payment Settled\n"
+            f"- **Bill ID:** `#{result.get('bill_id')}`\n"
+            f"- **Payment Amount:** **${result.get('amount', 0):,.2f} USD**\n"
+            f"- **Payment ID:** `#{result.get('payment_id')}`\n"
+            f"- **Portal:** [View in Bigcapital](https://finance.lokeshchanana.com)\n\n"
+            f"{result.get('message', '')}"
+        )
+
+    if tool_name == "finance_list_bills":
+        bills = result.get("bills", [])
+        if not bills:
+            return "### 🧾 Bigcapital Bills\nNo bills found matching query."
+        lines = [f"### 🧾 Bigcapital Bills (`{len(bills)}` listed)\n"]
+        lines.append("| ID | Vendor | Amount | Due Amount | Due Date | Status |")
+        lines.append("|---|---|---|---|---|---|")
+        for b in bills:
+            v_name = b.get("vendor_name") or (b.get("vendor") or {}).get("display_name") or "Vendor"
+            lines.append(
+                f"| `#{b.get('id')}` | **{v_name}** | ${float(b.get('amount', 0)):,.2f} | "
+                f"${float(b.get('due_amount', 0) or 0):,.2f} | `{b.get('due_date')}` | `{b.get('status', 'OPEN')}` |"
+            )
+        lines.append(f"\n[Open Bigcapital Portal](https://finance.lokeshchanana.com)")
+        return "\n".join(lines)
+
+    if tool_name == "finance_dashboard":
+        return (
+            f"### 📊 Financial Controller Dashboard\n"
+            f"- **Portal:** [https://finance.lokeshchanana.com](https://finance.lokeshchanana.com)\n"
+            f"- **Total Accounts Payable:** **${result.get('total_payable_usd', 0):,.2f} USD**\n"
+            f"- **Open / Unpaid Bills:** `{result.get('total_open_bills', 0)}`\n"
+            f"- **Urgent / Past Due:** `{result.get('urgent_due_bills', 0)}`\n"
+            f"- **Settled Bills:** `{result.get('total_paid_bills', 0)}`\n"
+        )
+
+    if tool_name == "finance_import_historical_bills":
+        return (
+            f"### 📦 Historical Bills Ingestion Completed\n"
+            f"- **Total Submitted:** `{result.get('total_submitted', 0)}`\n"
+            f"- **Successfully Imported:** `{result.get('imported', 0)}`\n"
+            f"- **Failed:** `{result.get('failed', 0)}`\n"
+            f"- **Portal:** [View in Bigcapital](https://finance.lokeshchanana.com)"
         )
 
     return f"```json\n{json.dumps(result, indent=2)}\n```"

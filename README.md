@@ -44,6 +44,7 @@ flowchart TB
             CheckinApp["checkin-app<br/>(Visitor Intake Kiosk)"]
             TwentyCRM["Twenty CRM<br/>(Server & Worker)"]
             RelaticleCRM["Relaticle CRM<br/>(Core App & Horizon Worker)"]
+            Bigcapital["Bigcapital<br/>(Core Accounting & Finances)"]
             N8N["n8n Automation Engine<br/>(Workflows & Webhooks)"]
             AgentHub["Agent Hub<br/>(Autonomous Multi-Agent System)"]
         end
@@ -155,12 +156,15 @@ Casa-poki relies on native, block-level ZFS replication to a dedicated secondary
   - Zero-Trust tunnel client establishing encrypted outbound tunnels to Cloudflare.
   - Exposes public services without exposing host firewall ports or requiring static public IPs.
 
-### CRM Stack
+### CRM & Accounting Stack
 - **`twenty`** (`twenty/`):
   - Modern CRM stack running application server, background queue worker, PostgreSQL, and Redis cache.
   - Handles client contacts, sales pipelines, and task schedules.
 - **`relaticle`** (`relaticle/`):
   - Comprehensive relationship management platform running Laravel, Filament PHP, and Horizon Redis queue workers.
+- **`bigcapital`** (`bigcapital/`):
+  - Self-hosted double-entry core accounting platform hosted at `https://finance.lokeshchanana.com` (Envoy proxy, NestJS server, MariaDB, Redis, ClickHouse, Gotenberg, and Garage S3 storage).
+  - Managed autonomously by **Fiona Banks** (Casa-poki Financial Controller) with tools for bill creation, payment reconciliation, accounts payable monitoring, and historical backfills.
 - **`postgres-db`** (`postgres-db/`):
   - Dedicated PostgreSQL 17 Alpine instance providing relational database services for CRM workloads.
 
@@ -215,6 +219,7 @@ Casa-poki relies on native, block-level ZFS replication to a dedicated secondary
 | **8091** | `checkin-app` | Visitor Registration Kiosk | Cloudflare Tunnel / Checkin Subdomain |
 | **8094** | `agent-hub` | Autonomous Multi-Agent API | Local LAN / Internal Docker Network |
 | **8095** | `beszel` | System Metrics Hub | Cloudflare Tunnel / Metrics Subdomain |
+| **8096** | `bigcapital-proxy` | Bigcapital Core Accounting UI & API | Cloudflare Tunnel / `finance.lokeshchanana.com` |
 | **9123** | `habridge` | Smart Home Bridge | Local LAN Only |
 | **11434**| `ollama` | Local AI Inference | Local LAN / Internal Docker Network |
 | **45876**| `beszel-agent` | Metric Collector Daemon | Host Internal Loopback |
