@@ -246,7 +246,7 @@ TOOL_SCHEMAS = [
                 "properties": {
                     "target_agent": {
                         "type": "string",
-                        "enum": ["manager", "it", "auditor", "intake", "finance", "marketing", "cma"],
+                        "enum": ["manager", "it", "auditor", "intake", "finance", "marketing", "cma", "mailman"],
                         "description": "The specialist agent to delegate this task to",
                     },
                     "task_description": {
@@ -438,6 +438,26 @@ TOOL_SCHEMAS = [
                     },
                 },
                 "required": ["bills"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mailman_read_inbox",
+            "description": "Silas Drake (Mail Courier & Dispatcher) connects to lokesh@lokeshchanana.com to fetch, read, and triage unread incoming emails, bringing structured email intelligence to Marcus Vance for routing (Finance bills to Fiona, CRM leads to Miles, CMA to Carter, marketing to Maya, or discarding spam).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of recent unread emails to inspect (default 5)",
+                    },
+                    "filter_keyword": {
+                        "type": "string",
+                        "description": "Optional keyword or sender to filter emails by",
+                    },
+                },
             },
         },
     },
@@ -764,6 +784,113 @@ async def _direct_manage_opportunities(args: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+async def _execute_mailman_inbox(args: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Silas Drake connects to lokesh@lokeshchanana.com via n8n webhook or direct IMAP,
+    fetching unread emails for Marcus Vance to route.
+    """
+    limit = args.get("limit") or 5
+    filter_kw = args.get("filter_keyword")
+    target_account = "lokesh@lokeshchanana.com"
+
+    # 1. Try n8n Mailman triage webhook
+    n8n_url = f"{N8N_BASE_URL}/webhook/mailman-inbox-triage"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                n8n_url,
+                json={"account": target_account, "limit": limit, "filter": filter_kw or ""},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                emails = data.get("emails", [])
+                return {
+                    "ok": True,
+                    "tool": "mailman_read_inbox",
+                    "account": target_account,
+                    "status": "LIVE_FETCH",
+                    "source": "n8n_gateway",
+                    "emails": emails,
+                    "total_found": len(emails),
+                }
+    except Exception as e:
+        logger.debug(f"n8n mailman webhook not reachable: {e}")
+
+    # 2. Try direct IMAP if App Password is set in environment
+    imap_user = os.environ.get("MAIL_IMAP_USER", target_account)
+    imap_pass = os.environ.get("MAIL_IMAP_PASSWORD", "")
+    if imap_pass:
+        try:
+            import email
+            import imaplib
+            from email.header import decode_header
+
+            mail = imaplib.IMAP4_SSL("imap.gmail.com", 993)
+            mail.login(imap_user, imap_pass)
+            mail.select("INBOX")
+            status, messages = mail.search(None, "UNSEEN")
+            mail_ids = messages[0].split()
+            emails = []
+            for mid in mail_ids[-limit:]:
+                res, msg_data = mail.fetch(mid, "(RFC822)")
+                for response_part in msg_data:
+                    if isinstance(response_part, tuple):
+                        msg = email.message_from_bytes(response_part[1])
+                        raw_sub = msg.get("Subject", "")
+                        decoded_list = decode_header(raw_sub)
+                        subject = ""
+                        if decoded_list:
+                            sub_bytes, enc = decoded_list[0]
+                            subject = sub_bytes.decode(enc or "utf-8", errors="ignore") if isinstance(sub_bytes, bytes) else str(sub_bytes)
+                        from_ = msg.get("From", "Unknown")
+                        date_ = msg.get("Date", "")
+                        body = ""
+                        if msg.is_multipart():
+                            for part in msg.walk():
+                                if part.get_content_type() == "text/plain":
+                                    pl = part.get_payload(decode=True)
+                                    if pl:
+                                        body = pl.decode(errors="ignore")[:300]
+                                    break
+                        else:
+                            pl = msg.get_payload(decode=True)
+                            if pl:
+                                body = pl.decode(errors="ignore")[:300]
+                        clean_body = re.sub(r"\s+", " ", body).strip()
+                        emails.append(
+                            {
+                                "id": mid.decode(),
+                                "sender": from_,
+                                "subject": subject,
+                                "date": date_,
+                                "snippet": clean_body,
+                            }
+                        )
+            mail.close()
+            mail.logout()
+            return {
+                "ok": True,
+                "tool": "mailman_read_inbox",
+                "account": target_account,
+                "status": "LIVE_FETCH",
+                "source": "direct_imap",
+                "emails": emails,
+                "total_unread": len(mail_ids),
+            }
+        except Exception as imap_err:
+            logger.warning(f"Direct IMAP fetch error for {target_account}: {imap_err}")
+
+    # 3. Ready in office, awaiting credential linkage
+    return {
+        "ok": True,
+        "tool": "mailman_read_inbox",
+        "account": target_account,
+        "status": "AWAITING_WORKSPACE_CREDENTIAL",
+        "message": f"Silas Drake (Mailman) is active and in office, but waiting for Google Workspace credentials to connect to {target_account}.",
+        "emails": [],
+    }
+
+
 # =============================================================================
 # Tool Execution Dispatcher
 # =============================================================================
@@ -853,6 +980,12 @@ async def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     if name == "finance_import_historical_bills":
         bills_data = args.get("bills", [])
         res = await bigcapital_client.import_historical_bills(bills_data)
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
+    # Mailman Inbox Handler
+    if name == "mailman_read_inbox":
+        res = await _execute_mailman_inbox(args)
         res["duration_ms"] = int((time.time() - start_ts) * 1000)
         return res
 
@@ -1125,5 +1258,29 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
             f"- **Failed:** `{result.get('failed', 0)}`\n"
             f"- **Portal:** [View in Bigcapital](https://finance.lokeshchanana.com)"
         )
+
+    if tool_name == "mailman_read_inbox":
+        account = result.get("account", "lokesh@lokeshchanana.com")
+        status = result.get("status")
+        if status == "AWAITING_WORKSPACE_CREDENTIAL":
+            return (
+                f"### 📬 Silas Drake (Mail Courier & Dispatcher)\n"
+                f"- **Mailbox Monitored:** `{account}`\n"
+                f"- **Status:** In office and active, awaiting Google Workspace credential link.\n"
+                f"- **Action:** Once Google Workspace credentials (IMAP App Password or OAuth) are linked, Silas Drake will fetch incoming emails and bring them directly to Marcus Vance for routing."
+            )
+        emails = result.get("emails") or []
+        if not emails:
+            return f"### 📬 Silas Drake (Mail Courier)\nChecked `{account}` inbox: No new unread emails found."
+        lines = [f"### 📬 Silas Drake (Mail Courier) — Incoming Emails from `{account}` (`{len(emails)}` unread)\n"]
+        for em in emails:
+            lines.append(
+                f"- **From:** `{em.get('sender')}`\n"
+                f"  - **Subject:** {em.get('subject')}\n"
+                f"  - **Date:** `{em.get('date')}`\n"
+                f"  - **Preview:** {em.get('snippet') or 'N/A'}\n"
+            )
+        lines.append("\n*Silas Drake has delivered these emails to Marcus Vance for specialist triage.*")
+        return "\n".join(lines)
 
     return f"```json\n{json.dumps(result, indent=2)}\n```"

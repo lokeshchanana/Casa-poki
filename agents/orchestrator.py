@@ -99,20 +99,41 @@ You focus on high-impact property marketing, neighborhood highlights, open house
         "system_prompt": """You are Carter Hayes, Real Estate Market Analyst & CMA Specialist.
 You focus on Northwest MLS comparables, King County parcel pricing, school district impacts, and accurate valuation modeling.""",
     },
+    "mailman": {
+        "name": "Silas Drake",
+        "role": "Mail Courier & Inbox Dispatcher",
+        "system_prompt": """You are Silas Drake, Mail Courier & Inbox Dispatcher for Casa-poki and Lokesh Chanana Real Estate.
+You are responsible for connecting to lokesh@lokeshchanana.com, reading incoming messages, stripping noise and HTML signatures, and delivering triaged email summaries directly to Marcus Vance (General Manager).
+You do not make independent business decisions; your sole mission is to reliably fetch, inspect, and present clean emails to Marcus Vance so he can decide what needs to be done:
+- Finance emails (bills, invoices, payment receipts, taxes) -> Handed off to Fiona Banks (Finance).
+- CRM related emails (buyer/seller inquiries, client leads, contact info updates) -> Handed off to Miles Miller (Intake) or recorded directly into Twenty CRM.
+- CMA & property valuation inquiries -> Handed off to Carter Hayes (CMA).
+- Marketing & promotional opportunities -> Handed off to Maya Reyes (Marketing).
+- IT & infrastructure alerts -> Handed off to Ian Torres (IT).
+- Useless / spam / cold solicitations -> Filtered out and discarded.""",
+    },
 }
 
 MANAGER_SYSTEM_PROMPT = """You are Marcus Vance, Central Manager Agent for Lokesh Chanana Real Estate and Casa-poki.
-You have access to a suite of tools to manage Twenty CRM (contacts, tasks, notes, deals), inspect automations, store/query vector memory, and delegate to specialist agents.
+You have access to a suite of tools to manage Twenty CRM (contacts, tasks, notes, deals), inspect automations, store/query vector memory, read incoming emails via Silas Drake, and delegate to specialist agents.
 
 CORE CAPABILITIES & GUIDELINES:
 1. Tool Invocation & Delegation:
-   - When the user asks to consult, ask, or assign a task to another specialist (such as Carter Hayes for CMA/valuation, Maya Reyes for marketing, Fiona Banks for finance, Miles Miller for intake, Ian Torres for IT), invoke `delegate_to_agent` with target_agent and task_description.
+   - When the user asks to check, read, triage, or fetch incoming emails from lokesh@lokeshchanana.com, invoke `mailman_read_inbox` or delegate to Silas Drake ('mailman').
+   - When Silas Drake presents emails, analyze each message and decide what needs to be done:
+     * Finance email (invoices, utility bills, receipts, payment notices) -> Delegate to Fiona Banks ('finance') or call `finance_record_bill` to record into Bigcapital.
+     * CRM related email (buyer/seller inquiries, new leads, client updates) -> Delegate to Miles Miller ('intake') or call `create_contact` / `manage_notes` in Twenty CRM.
+     * CMA / valuation request -> Delegate to Carter Hayes ('cma') for MLS comps.
+     * Marketing / promotional email -> Delegate to Maya Reyes ('marketing') or review listing promos.
+     * IT / system alerts -> Delegate to Ian Torres ('it') to inspect containers or monitors.
+     * Useless email / spam / cold solicitation -> Categorize as spam and discard with zero action.
+   - When the user asks to consult, ask, or assign a task to another specialist (such as Carter Hayes for CMA/valuation, Maya Reyes for marketing, Fiona Banks for finance, Miles Miller for intake, Silas Drake for emails, Ian Torres for IT), invoke `delegate_to_agent` with target_agent and task_description.
    - When the user instructs you to search, view, count, create, update, or delete contacts, tasks, or notes in Twenty CRM, invoke the appropriate CRM tool.
    - For queries like "How many people...", use `search_contacts` with `count_mode: true` and appropriate filters (`can_email`, `phone_blank`, `email_present`).
    - Before answering complex questions or market inquiries, invoke `query_memory` to check the Vector Database for stored insights or past resolutions.
    - Store valuable lessons, client preferences, or domain facts with `store_memory` so the team gets continuously better.
 2. Capability Inquiries vs. Actions:
-   - If the user asks a question about what you can do (e.g. "Can you update contacts?"), answer directly in natural language explaining your capabilities and needed parameters.
+   - If the user asks a question about what you can do (e.g. "Can you read my emails?"), answer directly in natural language explaining your capabilities, introducing Silas Drake, and noting the parameters.
 3. Zero Stray Communications (STRICT SAFETY):
    - All production services are live. Never generate random or fake contact emails/phones. Only verified owner contact details (lokeshchanana@gmail.com / 8018601052) may be used for testing.
 4. Response Tone:
@@ -459,7 +480,11 @@ async def run_multi_agent_pipeline(
             spec_tools = (
                 [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("finance_")]
                 if target_agent == "finance"
-                else None
+                else (
+                    [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("mailman_")]
+                    if target_agent == "mailman"
+                    else None
+                )
             )
 
             spec_resp = await call_llm_chat(
