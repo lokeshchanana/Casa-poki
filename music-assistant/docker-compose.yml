@@ -1,0 +1,15 @@
+services:
+  music-assistant:
+    image: ghcr.io/music-assistant/server:latest
+    container_name: music-assistant
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env
+    volumes:
+      - /tank/music-assistant/data:/data
+      - /tank/music-assistant/music:/media:ro
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+    privileged: true

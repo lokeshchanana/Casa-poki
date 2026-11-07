@@ -114,6 +114,7 @@ Casa-poki enforces total physical separation between application code, applicati
   | `tank/postgres-db` | PostgreSQL 17 relational database files |
   | `tank/re_office_data`| Office 365 synchronization state and cached tokens |
   | `tank/relaticle` | Relaticle CRM file storage, OAuth keys, and Redis state |
+  | `tank/music-assistant` | Music Assistant server database, cache, and local media library |
 
 ### Secrets Management & Hygiene
 - **Zero Leak Policy**: No secret, password, private key, token, or `.env` file is ever committed to version control.
@@ -196,6 +197,8 @@ Casa-poki relies on native, block-level ZFS replication to a dedicated secondary
   - Local IoT device emulator bridging smart home peripherals.
 - **`mic-bridge`** (`mic-bridge/`):
   - Audio capture and FFT spectrum analysis bridge broadcasting lighting sync pulses via MQTT.
+- **`music-assistant`** (`music-assistant/`):
+  - Music streaming and library management platform hosted at `https://music.lokeshchanana.com` running in host network mode for LAN speaker discovery and Home Assistant integration.
 
 ### Antigravity AI Agent Engine
 - **Service**: `antigravity-cli-daemon.service` running as a systemd user daemon.
@@ -218,8 +221,9 @@ Casa-poki relies on native, block-level ZFS replication to a dedicated secondary
 | **8089** | `real-estate-dev` | Staging Web Platform | Cloudflare Tunnel / Dev Subdomain |
 | **8091** | `checkin-app` | Visitor Registration Kiosk | Cloudflare Tunnel / Checkin Subdomain |
 | **8094** | `agent-hub` | Autonomous Multi-Agent API | Local LAN / Internal Docker Network |
-| **8095** | `beszel` | System Metrics Hub | Cloudflare Tunnel / Metrics Subdomain |
+| **8095** | `music-assistant` | Music Assistant Streaming Server | Cloudflare Tunnel / `music.lokeshchanana.com` |
 | **8096** | `bigcapital-proxy` | Bigcapital Core Accounting UI & API | Cloudflare Tunnel / `finance.lokeshchanana.com` |
+| **8098** | `beszel` | System Metrics Hub | Cloudflare Tunnel / Metrics Subdomain |
 | **9123** | `habridge` | Smart Home Bridge | Local LAN Only |
 | **11434**| `ollama` | Local AI Inference | Local LAN / Internal Docker Network |
 | **45876**| `beszel-agent` | Metric Collector Daemon | Host Internal Loopback |

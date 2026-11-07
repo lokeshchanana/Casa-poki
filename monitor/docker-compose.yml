@@ -14,7 +14,7 @@ services:
     container_name: beszel
     restart: unless-stopped
     ports:
-      - "8095:8090"
+      - "8098:8090"
     volumes:
       - /tank/monitor/beszel_data:/beszel_data
     environment:
