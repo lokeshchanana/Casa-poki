@@ -42,12 +42,12 @@ fi
 
 # 3. Find latest common snapshot between local tank and remote nfspool
 echo "[$(date -Is)] Finding latest common snapshot between ${LOCAL_POOL} and ${REMOTE_HOST}:${REMOTE_POOL}..."
-REMOTE_SNAPS=$(ssh -o BatchMode=yes "${REMOTE_USER}@${REMOTE_HOST}" "zfs list -H -o name -t snapshot -r ${REMOTE_POOL}" || true)
+REMOTE_SNAPS=$(ssh -o BatchMode=yes "${REMOTE_USER}@${REMOTE_HOST}" "zfs list -H -o name -t snapshot -s creation -d 1 ${REMOTE_POOL}" || true)
 
 LATEST_COMMON=""
 if [ -n "${REMOTE_SNAPS}" ]; then
-  LOCAL_SNAPS=$(zfs list -H -o name -t snapshot -r "${LOCAL_POOL}" | awk -F'@' '{print $2}' | sort -u)
-  for s in $(echo "${REMOTE_SNAPS}" | awk -F'@' '{print $2}' | sort -u | tac); do
+  LOCAL_SNAPS=$(zfs list -H -o name -t snapshot -s creation -d 1 "${LOCAL_POOL}" | awk -F'@' '{print $2}')
+  for s in $(echo "${REMOTE_SNAPS}" | awk -F'@' '{print $2}' | tac); do
     if echo "${LOCAL_SNAPS}" | grep -qx "${s}"; then
       LATEST_COMMON="${s}"
       break
