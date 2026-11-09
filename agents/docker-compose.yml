@@ -16,7 +16,9 @@ services:
       - N8N_DB_PATH=/tank/n8n/database.sqlite
       - AGENT_DATA_DIR=/app/data
       - AGENT_BACKLOG_DIR=/app/backlog/missing_n8n_workflows
-      - TASK_TOKEN_BUDGET=32000
+      - TASK_TOKEN_BUDGET=64000
+      - AGENT_BACKEND=antigravity
+      - AGY_PATH=/usr/local/bin/agy
     volumes:
       - /tank/n8n:/tank/n8n:ro
       - /tank/monitor:/tank/monitor:ro
@@ -24,3 +26,10 @@ services:
       - .:/app
       - ./data:/app/data
       - ./backlog:/app/backlog
+      - /home/lokesh/.local/bin/agy:/usr/local/bin/agy:ro
+      - /home/lokesh/.gemini/oauth_creds.json:/root/.gemini/oauth_creds.json:ro
+      - /home/lokesh/.gemini/google_accounts.json:/root/.gemini/google_accounts.json:ro
+      - /home/lokesh/.gemini/installation_id:/root/.gemini/installation_id:ro
+      - /tank/agents/antigravity-cli:/root/.gemini/antigravity-cli
+      - /home/lokesh/.gemini/antigravity-cli/antigravity-oauth-token:/root/.gemini/antigravity-cli/antigravity-oauth-token:ro
+      - /home/lokesh/.gemini/antigravity-cli/settings.json:/root/.gemini/antigravity-cli/settings.json:ro

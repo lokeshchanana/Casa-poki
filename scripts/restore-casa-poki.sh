@@ -146,6 +146,9 @@ for s in "${SERVICES[@]}"; do
   fi
 done
 
+# Ensure dedicated agent-hub runtime dirs exist
+mkdir -p /tank/agents/antigravity-cli && chmod 777 /tank/agents/antigravity-cli
+
 # Special case for ai/n8n
 if [ -f "/tank/n8n/.env" ]; then
   rm -f "${REPO_DIR}/ai/n8n/.env"

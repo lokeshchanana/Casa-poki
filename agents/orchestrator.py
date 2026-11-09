@@ -1,7 +1,9 @@
+import asyncio
 import json
 import logging
 import os
 import re
+import shutil
 import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -28,9 +30,11 @@ import vector_memory
 
 logger = logging.getLogger("agent_orchestrator")
 
+AGENT_BACKEND = os.environ.get("AGENT_BACKEND", "antigravity").lower()
+AGY_PATH = os.environ.get("AGY_PATH", "/usr/local/bin/agy")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://192.168.1.240:11434")
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "crm-qwen:3b")
-DEFAULT_TASK_BUDGET = int(os.environ.get("TASK_TOKEN_BUDGET", "32000"))
+DEFAULT_TASK_BUDGET = int(os.environ.get("TASK_TOKEN_BUDGET", "64000"))
 
 
 # =============================================================================
@@ -184,10 +188,176 @@ Output JSON:
 
 
 # =============================================================================
+# Antigravity Native Engine & Parser
+# =============================================================================
+
+def parse_antigravity_output(raw_text: str) -> tuple[str, List[Dict[str, Any]]]:
+    """
+    Parses output from Antigravity CLI, detecting structured tool_call JSON blocks
+    or returning natural markdown content.
+    """
+    text = (raw_text or "").strip()
+
+    # 1. Check for markdown codeblocks ```json ... ```
+    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if match:
+        try:
+            data = json.loads(match.group(1))
+            if isinstance(data, dict) and "tool_call" in data:
+                tc = data["tool_call"]
+                return "", [{"function": {"name": tc.get("name"), "arguments": tc.get("arguments", {})}}]
+        except Exception:
+            pass
+
+    # 2. Balanced brace scan for {"tool_call"
+    idx = text.find('{"tool_call"')
+    if idx == -1:
+        idx = text.find('{ "tool_call"')
+    if idx != -1:
+        depth = 0
+        end_idx = -1
+        for i in range(idx, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    end_idx = i + 1
+                    break
+        if end_idx != -1:
+            try:
+                data = json.loads(text[idx:end_idx])
+                if isinstance(data, dict) and "tool_call" in data:
+                    tc = data["tool_call"]
+                    leading = text[:idx].strip()
+                    return leading, [{"function": {"name": tc.get("name"), "arguments": tc.get("arguments", {})}}]
+            except Exception:
+                pass
+
+    # 3. Pure JSON
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict) and "tool_call" in data:
+            tc = data["tool_call"]
+            return "", [{"function": {"name": tc.get("name"), "arguments": tc.get("arguments", {})}}]
+    except Exception:
+        pass
+
+    return text, []
+
+
+async def call_antigravity_cli(
+    task_id: str,
+    agent_name: str,
+    messages: List[Dict[str, Any]],
+    tools: Optional[List[Dict[str, Any]]] = None,
+    agy_bin: str = "/usr/local/bin/agy",
+    max_tokens: int = 2000,
+    temperature: float = 0.1,
+) -> Dict[str, Any]:
+    """
+    Executes prompt against native Antigravity CLI runtime (agy) with zero API keys.
+    """
+    start_ts = time.time()
+
+    system_parts = []
+    conversation_parts = []
+
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content", "")
+        if role == "system":
+            system_parts.append(content)
+        elif role == "user":
+            conversation_parts.append(f"User: {content}")
+        elif role == "assistant":
+            conversation_parts.append(f"Assistant: {content}")
+
+    prompt_builder = []
+    if system_parts:
+        prompt_builder.append("### SYSTEM INSTRUCTIONS & PERSONA ###\n" + "\n\n".join(system_parts))
+
+    if tools:
+        tool_desc = json.dumps(tools, indent=2)
+        prompt_builder.append(
+            f"### AVAILABLE TOOLS ###\n{tool_desc}\n\n"
+            "### TOOL CALL INSTRUCTIONS ###\n"
+            "If you need to execute a tool, respond ONLY with a JSON object in this format:\n"
+            '{"tool_call": {"name": "<tool_name>", "arguments": { ... }}}\n'
+            "If no tool call is needed, provide your natural markdown answer directly."
+        )
+
+    if conversation_parts:
+        prompt_builder.append("### CONVERSATION TURNS ###\n" + "\n\n".join(conversation_parts))
+
+    full_prompt = "\n\n".join(prompt_builder)
+
+    cmd = [
+        agy_bin,
+        "-p", full_prompt,
+        "--output-format", "json",
+        "--dangerously-skip-permissions",
+    ]
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        raw_output = stdout.decode().strip()
+
+        if proc.returncode != 0 or not raw_output:
+            err_msg = stderr.decode().strip() or "Empty output from Antigravity"
+            logger.error(f"Antigravity CLI failed (code {proc.returncode}): {err_msg}")
+            raise RuntimeError(f"Antigravity CLI error: {err_msg}")
+
+        data = json.loads(raw_output)
+        raw_resp = data.get("response", "") or ""
+        duration_sec = float(data.get("duration_seconds", 0.0) or 0.0)
+        duration_ms = int(duration_sec * 1000) if duration_sec > 0 else int((time.time() - start_ts) * 1000)
+
+        usage = data.get("usage") or {}
+        prompt_tokens = int(usage.get("input_tokens") or 0)
+        completion_tokens = int(usage.get("output_tokens") or 0)
+        tok_per_sec = (completion_tokens / duration_sec) if duration_sec > 0 else 0.0
+
+        content, tool_calls = parse_antigravity_output(raw_resp)
+
+        metrics = log_token_usage(
+            task_id=task_id,
+            agent_name=agent_name,
+            model="antigravity-native",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            tokens_per_sec=round(tok_per_sec, 2),
+            duration_ms=duration_ms,
+        )
+
+        return {
+            "content": content,
+            "tool_calls": tool_calls,
+            "metrics": metrics,
+        }
+    except Exception as e:
+        logger.error(f"Antigravity execution failed: {e}")
+        if OLLAMA_BASE_URL:
+            logger.warning("Falling back to Ollama engine...")
+            return await call_ollama_chat(task_id, agent_name, messages, tools, max_tokens, temperature)
+        duration_ms = int((time.time() - start_ts) * 1000)
+        return {
+            "content": f"Antigravity Error: {str(e)}",
+            "tool_calls": [],
+            "metrics": log_token_usage(task_id, agent_name, "antigravity-native", 0, 0, 0.0, duration_ms),
+        }
+
+
+# =============================================================================
 # LLM Gateway (Native Tool Calling & Chat)
 # =============================================================================
 
-async def call_llm_chat(
+async def call_ollama_chat(
     task_id: str,
     agent_name: str,
     messages: List[Dict[str, Any]],
@@ -196,7 +366,7 @@ async def call_llm_chat(
     temperature: float = 0.1,
 ) -> Dict[str, Any]:
     """
-    Calls the local or configured LLM engine with tool declarations and token tracking.
+    Fallback call to local Ollama engine.
     """
     start_ts = time.time()
     payload: Dict[str, Any] = {
@@ -251,6 +421,45 @@ async def call_llm_chat(
         "tool_calls": tool_calls,
         "metrics": metrics,
     }
+
+
+async def call_llm_chat(
+    task_id: str,
+    agent_name: str,
+    messages: List[Dict[str, Any]],
+    tools: Optional[List[Dict[str, Any]]] = None,
+    max_tokens: int = 2000,
+    temperature: float = 0.1,
+) -> Dict[str, Any]:
+    """
+    Unified LLM gateway: Prefers native Antigravity runtime (agy) with zero API keys.
+    Falls back to Ollama if Antigravity binary is not available.
+    """
+    resolved_agy = None
+    for candidate in [AGY_PATH, "/usr/local/bin/agy", "/home/lokesh/.local/bin/agy", shutil.which("agy")]:
+        if candidate and os.path.exists(candidate):
+            resolved_agy = candidate
+            break
+
+    if AGENT_BACKEND == "antigravity" and resolved_agy:
+        return await call_antigravity_cli(
+            task_id=task_id,
+            agent_name=agent_name,
+            messages=messages,
+            tools=tools,
+            agy_bin=resolved_agy,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+    return await call_ollama_chat(
+        task_id=task_id,
+        agent_name=agent_name,
+        messages=messages,
+        tools=tools,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
 
 
 # =============================================================================
