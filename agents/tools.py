@@ -826,7 +826,7 @@ async def _execute_mailman_inbox(args: Dict[str, Any]) -> Dict[str, Any]:
             from email.header import decode_header
 
             mail = imaplib.IMAP4_SSL("imap.gmail.com", 993)
-            mail.login(imap_user, imap_pass)
+            mail.login(imap_user, imap_pass.replace(" ", ""))
             mail.select("INBOX")
             status, messages = mail.search(None, "UNSEEN")
             mail_ids = messages[0].split()
