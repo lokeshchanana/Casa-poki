@@ -628,7 +628,7 @@ def get_chat_history(session_id: str, limit: int = 10) -> List[Dict[str, Any]]:
 
     history = []
     for r in reversed(rows):
-        msg: Dict[str, Any] = {"role": r[0], "content": r[1]}
+        msg: Dict[str, Any] = {"role": r[0], "content": r[1], "created_at": r[3]}
         if r[2]:
             try:
                 msg["tool_calls"] = json.loads(r[2])

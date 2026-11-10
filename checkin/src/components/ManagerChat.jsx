@@ -289,9 +289,34 @@ export default function ManagerChat({ onBackToCheckIn }) {
     }
   };
 
+  const fetchChatHistory = async () => {
+    try {
+      const res = await fetch(`${getApiBase()}/chat/history?sessionId=${encodeURIComponent(sessionId)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && Array.isArray(data.messages) && data.messages.length > 0) {
+          const loaded = data.messages.map((m, idx) => ({
+            id: `server_${m.id || idx}_${Date.now()}`,
+            role: m.role,
+            content: m.content,
+            timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+            trace: [],
+            tokensUsed: 0,
+            tokenBudget: 64000,
+            isThinking: false
+          }));
+          setMessages(loaded);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load server chat history:', e);
+    }
+  };
+
   useEffect(() => {
     fetchDashboard();
-  }, []);
+    fetchChatHistory();
+  }, [sessionId]);
 
   useEffect(() => {
     try {
@@ -467,13 +492,13 @@ export default function ManagerChat({ onBackToCheckIn }) {
                     : m
                 )
               );
-            } else if (event.type === 'complete') {
+            } else if (event.type === 'complete' || event.type === 'agent_summary') {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantMsgId
                     ? {
                         ...m,
-                        trace: event.trace || currentTraces,
+                        trace: event.trace || event.trace_steps || currentTraces,
                         tokensUsed: event.tokens_used || 0,
                         tokenBudget: event.token_budget || 2000,
                         specCreated: event.spec_created || null,

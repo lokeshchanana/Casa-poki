@@ -543,6 +543,15 @@ async def run_multi_agent_pipeline(
         add_chat_message(session_id, "assistant", reply)
         yield emit("item", {"content": reply})
         yield emit(
+            "complete",
+            {
+                "success": True,
+                "trace": trace_steps,
+                "tokens_used": 0,
+                "token_budget": token_budget,
+            },
+        )
+        yield emit(
             "agent_summary",
             {
                 "success": True,
@@ -583,6 +592,15 @@ async def run_multi_agent_pipeline(
         add_chat_message(session_id, "user", user_message)
         add_chat_message(session_id, "assistant", reply)
         yield emit("item", {"content": reply})
+        yield emit(
+            "complete",
+            {
+                "success": True,
+                "trace": trace_steps,
+                "tokens_used": 0,
+                "token_budget": token_budget,
+            },
+        )
         yield emit(
             "agent_summary",
             {
@@ -897,6 +915,16 @@ async def run_multi_agent_pipeline(
         # Deliver final content
         yield emit("item", {"content": formatted_result})
         yield emit(
+            "complete",
+            {
+                "success": audit_ok,
+                "workflow_executed": "crmRelaticleAssistant",
+                "trace": trace_steps,
+                "tokens_used": tokens_used,
+                "token_budget": token_budget,
+            },
+        )
+        yield emit(
             "agent_summary",
             {
                 "success": audit_ok,
@@ -986,6 +1014,16 @@ async def run_multi_agent_pipeline(
         logger.warning(f"Could not log chat flow: {e}")
 
     yield emit("item", {"content": final_msg})
+    yield emit(
+        "complete",
+        {
+            "success": True,
+            "workflow_executed": None,
+            "trace": trace_steps,
+            "tokens_used": tokens_used,
+            "token_budget": token_budget,
+        },
+    )
     yield emit(
         "agent_summary",
         {

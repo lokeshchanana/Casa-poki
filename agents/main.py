@@ -15,6 +15,7 @@ from orchestrator import DEFAULT_MODEL, DEFAULT_TASK_BUDGET, run_multi_agent_pip
 from state_store import (
     add_lesson,
     delete_lesson,
+    get_chat_history,
     get_office_floor_state,
     get_recent_request_flows,
     get_system_summary,
@@ -161,6 +162,12 @@ def memory_query(req: MemoryQueryRequest) -> dict:
         top_k=req.top_k or 4,
     )
     return {"ok": True, "query": req.query, "matches": matches, "count": len(matches)}
+
+
+@app.get("/api/manager/chat/history")
+async def manager_chat_history(sessionId: Optional[str] = "manager_default", limit: int = 30):
+    msgs = get_chat_history(sessionId or "manager_default", limit=limit)
+    return {"ok": True, "sessionId": sessionId, "messages": msgs}
 
 
 @app.post("/api/manager/chat")
