@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 import time
 from datetime import datetime
@@ -7,9 +8,98 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from state_store import log_request_flow
-from tools import crm_get, crm_post, crm_patch
+from tools import crm_get, crm_post, crm_patch, _direct_search_contacts
 
 logger = logging.getLogger("agent_webhooks")
+
+# =============================================================================
+# SMS Gate Client Configuration (https://api.sms-gate.app/3rdparty/v1/messages)
+# =============================================================================
+SMSGATE_ENABLED = os.environ.get("SMSGATE_ENABLED", "true").lower() in ("true", "1", "yes")
+SMSGATE_ENDPOINT = os.environ.get("SMSGATE_ENDPOINT", "https://api.sms-gate.app/3rdparty/v1/messages")
+SMSGATE_LOGIN = os.environ.get("SMSGATE_LOGIN", "")
+SMSGATE_PASSWORD = os.environ.get("SMSGATE_PASSWORD", "")
+SMSGATE_SIM_SLOT = int(os.environ.get("SMSGATE_SIM_SLOT", "0"))
+
+
+async def trigger_sms_gate(
+    guest_phone: str,
+    guest_name: str,
+    location: str,
+    is_represented: bool = False,
+    timeout: float = 12.0,
+) -> Dict[str, Any]:
+    """
+    Sends an automated Open House thank-you SMS with Loki's digital business card
+    via SMS Gate (https://api.sms-gate.app/3rdparty/v1/messages).
+    """
+    if not SMSGATE_ENABLED:
+        return {"skipped": True, "reason": "SMSGATE_ENABLED is false"}
+
+    digits = re.sub(r"[^0-9]", "", str(guest_phone or ""))
+    if not guest_phone or len(digits) < 10:
+        return {"skipped": True, "reason": "No valid phone number provided"}
+
+    if not SMSGATE_LOGIN or not SMSGATE_PASSWORD:
+        logger.warning("SMS Gate login credentials not configured in environment.")
+        return {"skipped": True, "reason": "Credentials not configured"}
+
+    first_name = (guest_name or "").split(" ")[0].strip() or guest_name or "Friend"
+    market_location = location or "today's open house"
+
+    if is_represented:
+        draft_text = (
+            f"Hi {first_name}, this is Lokesh Chanana (Loki). Thank you for touring the {market_location} today!\n\n"
+            f"Dropping my direct contact card for your records:\nhttps://lokeshchanana.com/loki.vcf\n\n"
+            f"Please feel free to have your agent reach out to me directly if they need disclosure packets or offer guidelines. Have a great day!"
+        )
+    else:
+        draft_text = (
+            f"Hi {first_name}, this is Lokesh Chanana (Loki). Thank you for visiting the {market_location} today!\n\n"
+            f"Dropping my direct contact card so you have it saved:\nhttps://lokeshchanana.com/loki.vcf\n\n"
+            f"Feel free to text or call if you have any questions about this property or anything in the area. Have a wonderful weekend!"
+        )
+
+    # SMS Gate API payload structure: phoneNumbers array and textMessage.text
+    payload = {
+        "phoneNumbers": [guest_phone],
+        "simSlot": SMSGATE_SIM_SLOT,
+        "textMessage": {
+            "text": draft_text
+        }
+    }
+
+    auth = httpx.BasicAuth(SMSGATE_LOGIN, SMSGATE_PASSWORD)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                SMSGATE_ENDPOINT,
+                json=payload,
+                auth=auth,
+                headers={"User-Agent": "Casa-Poki-Agent-Hub/1.0"}
+            )
+            is_ok = 200 <= resp.status_code < 300
+            resp_data = resp.json() if resp.content else {}
+            if is_ok:
+                logger.info(f"SMS Gate successfully dispatched message to {guest_phone} (HTTP {resp.status_code})")
+                return {
+                    "ok": True,
+                    "status_code": resp.status_code,
+                    "phone": guest_phone,
+                    "recipient": first_name,
+                    "message_id": resp_data.get("id") or resp_data.get("messageId"),
+                    "data": resp_data,
+                }
+            else:
+                logger.error(f"SMS Gate API returned HTTP {resp.status_code}: {resp.text}")
+                return {
+                    "ok": False,
+                    "status_code": resp.status_code,
+                    "error": resp.text,
+                }
+    except Exception as e:
+        logger.error(f"Failed to reach SMS Gate endpoint: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 def normalize_phone(num: Optional[str]) -> str:
@@ -71,10 +161,11 @@ async def handle_open_house_sign_in(payload: Dict[str, Any]) -> Dict[str, Any]:
     found_person = None
     if email:
         try:
-            res = await crm_get(f"/rest/people?filter=emails.primaryEmail[eq]:{email}")
-            people = res.get("data", {}).get("people", [])
-            if people:
-                found_person = people[0]
+            s_res = await _direct_search_contacts({"query": email})
+            for c in s_res.get("contacts", []):
+                if (c.get("email") or "").strip().lower() == email:
+                    found_person = c
+                    break
         except Exception as e:
             logger.warning(f"Error searching person by email: {e}")
 
@@ -83,10 +174,12 @@ async def handle_open_house_sign_in(payload: Dict[str, Any]) -> Dict[str, Any]:
         search_digits = digits[-10:] if len(digits) >= 10 else digits
         if search_digits:
             try:
-                res = await crm_get(f"/rest/people?filter=phones.primaryPhoneNumber[ilike]:%{search_digits}%")
-                people = res.get("data", {}).get("people", [])
-                if people:
-                    found_person = people[0]
+                s_res = await _direct_search_contacts({"query": search_digits})
+                for c in s_res.get("contacts", []):
+                    c_phone = re.sub(r"[^0-9]", "", str(c.get("phone") or ""))
+                    if search_digits in c_phone:
+                        found_person = c
+                        break
             except Exception as e:
                 logger.warning(f"Error searching person by phone: {e}")
 
@@ -183,11 +276,32 @@ async def handle_open_house_sign_in(payload: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Could not link task: {e}")
 
-    # 4. Quality Audit Verification
+    # 4. Automated SMS Follow-Up via SMS Gate
+    sms_result = None
+    sms_status = "none"
+    if phone:
+        market_desc = f"{city} open house" if city else "today's open house"
+        is_rep = str(working_with_agent).lower() in ("yes", "true", "1")
+        sms_result = await trigger_sms_gate(
+            guest_phone=phone,
+            guest_name=name,
+            location=market_desc,
+            is_represented=is_rep,
+        )
+        sms_status = "dispatched" if sms_result.get("ok") else ("skipped" if sms_result.get("skipped") else "failed")
+        steps.append({
+            "step": "SMS Gate Dispatch",
+            "agent": "Marcus Vance",
+            "action": f"Automated thank-you text with contact card ({sms_status}) to '{phone}'",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "status": "ok" if sms_result.get("ok") or sms_result.get("skipped") else "warning",
+        })
+
+    # 5. Quality Audit Verification
     steps.append({
         "step": "Quality Audit",
         "agent": "Audrey Chen",
-        "action": f"Verified CRM contact '{person_id}', attached note '{note_id}', and scheduled task '{task_id}'",
+        "action": f"Verified CRM contact '{person_id}', attached note '{note_id}', scheduled task '{task_id}', and SMS status ({sms_status})",
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "status": "ok",
     })
@@ -210,6 +324,7 @@ async def handle_open_house_sign_in(payload: Dict[str, Any]) -> Dict[str, Any]:
         "personId": person_id,
         "noteId": note_id,
         "taskId": task_id,
+        "smsResult": sms_result,
         "message": f"Welcome, {name}! Your check-in was successfully saved to Twenty CRM.",
         "duration_ms": duration_ms,
     }
@@ -481,3 +596,216 @@ async def handle_payment_intake(payload: Dict[str, Any]) -> Dict[str, Any]:
         duration_ms=duration_ms,
     )
     return res
+
+
+async def handle_communication_intake(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Unified communication ingestion webhook for incoming SMS or parsed emails.
+    Routes real estate events through Miles Miller (CRM Specialist).
+    """
+    flow_id = f"flow_comm_{int(time.time()*1000)}"
+    start_ts = time.time()
+    steps = []
+
+    sender = (payload.get("sender") or payload.get("from") or "").strip()
+    recipient = (payload.get("to") or "").strip()
+    subject = (payload.get("subject") or "").strip()
+    body = (payload.get("body") or payload.get("text") or payload.get("content") or "").strip()
+    channel = (payload.get("channel") or "email").lower()
+    msg_id = payload.get("message_id") or f"webhook_{flow_id}"
+
+    from state_store import is_communication_processed, record_processed_communication
+    if is_communication_processed(msg_id):
+        return {"ok": True, "status": "ALREADY_PROCESSED", "message_id": msg_id}
+
+    steps.append({
+        "step": "Communication Ingestion",
+        "agent": "Silas Drake",
+        "action": f"Ingested {channel} communication from '{sender}' (Subject: {subject[:40]}...)",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "status": "ok",
+    })
+
+    # Pattern recognition for Real Estate Lifecycle Events
+    event_type = "GENERAL_INQUIRY"
+    extracted_data: Dict[str, Any] = {}
+
+    lower_sub = subject.lower()
+    lower_body = body.lower()
+
+    # 1. NWMLS Search setup vs Portal activity
+    if "nwmls" in sender.lower() or "nwmlsmatrixmail.com" in sender.lower():
+        if "auto email" in lower_sub or "auto-email" in lower_sub or "initial search" in lower_sub:
+            event_type = "NWMLS_SEARCH_CREATED"
+        elif "portal" in lower_sub or "viewed" in lower_sub or "favorite" in lower_sub:
+            event_type = "NWMLS_PORTAL_ACTIVE"
+        else:
+            event_type = "NWMLS_NOTIFICATION"
+
+    # 2. Authentisign signing events
+    elif "authentisign.com" in sender.lower() or "authentisign" in lower_sub:
+        if "bba" in lower_sub or "buyer brokerage" in lower_sub or "services agreement" in lower_sub:
+            event_type = "AUTHENTISIGN_BBA_SIGNED"
+        elif "listing" in lower_sub or "exclusive sale" in lower_sub or "form 1a" in lower_sub:
+            event_type = "AUTHENTISIGN_LISTING_SIGNED"
+        elif "psa" in lower_sub or "purchase and sale" in lower_sub or "disclosure" in lower_sub or "offer" in lower_sub:
+            event_type = "AUTHENTISIGN_OFFER_DISCLOSURE_SIGNED"
+        else:
+            event_type = "AUTHENTISIGN_COMPLETED"
+
+    # 3. Inspection confirmed
+    elif "inspection confirmed" in lower_sub or "home inspection" in lower_sub:
+        event_type = "INSPECTION_CONFIRMED"
+
+    # 4. Closing / Title recording confirmation
+    elif "recording complete" in lower_sub or "closed" in lower_sub or "transaction closed" in lower_sub:
+        event_type = "TRANSACTION_CLOSED"
+
+    # Extraction of Property Address if present
+    addr_match = re.search(r"(\d{3,5}\s+[A-Za-z0-9\.\s]+(?:St|Ave|Avenue|Rd|Road|Way|Ct|Court|Dr|Drive|Blvd|Lane|Ln|E|W|N|S|NE|NW|SE|SW)[^,\n\r]*)", subject + " " + body, re.IGNORECASE)
+    if addr_match:
+        extracted_data["property_address"] = addr_match.group(1).strip()
+
+    # Extraction of Client Names
+    names_match = re.search(r"(?:for|client:)\s+([A-Z][a-z]+(?:\s+and\s+[A-Z][a-z]+|\s+[A-Z][a-z]+))", subject, re.IGNORECASE)
+    if names_match:
+        extracted_data["client_names"] = names_match.group(1).strip()
+
+    steps.append({
+        "step": "Triage & Handoff",
+        "agent": "Silas Drake",
+        "action": f"Classified event '{event_type}'. Handing off to Miles Miller for Twenty CRM execution.",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "status": "ok",
+    })
+
+    # Miles Miller executes the CRM state change
+    client_id = None
+    deal_id = None
+
+    from tools import _direct_search_contacts, _direct_update_contact, _direct_create_contact, _direct_manage_opportunities
+
+    # Match contact by email or extracted names
+    client_email = payload.get("client_email")
+    if not client_email and "@" in sender and "nwmls" not in sender and "authentisign" not in sender:
+        client_email = sender
+
+    matched_contact = None
+    if client_email:
+        s_res = await _direct_search_contacts({"query": client_email})
+        if s_res.get("contacts"):
+            matched_contact = s_res["contacts"][0]
+            client_id = matched_contact["id"]
+
+    if not matched_contact and extracted_data.get("client_names"):
+        first_part = extracted_data["client_names"].split(" and ")[0]
+        s_res = await _direct_search_contacts({"query": first_part})
+        if s_res.get("contacts"):
+            matched_contact = s_res["contacts"][0]
+            client_id = matched_contact["id"]
+
+    # Execute specific lifecycle actions
+    if event_type == "NWMLS_SEARCH_CREATED":
+        if client_id:
+            await _direct_update_contact({
+                "contact_id": client_id,
+                "lifecycle_stage": "Engaged",
+                "search_active": True,
+            })
+    elif event_type == "NWMLS_PORTAL_ACTIVE":
+        if client_id:
+            await _direct_update_contact({
+                "contact_id": client_id,
+                "lifecycle_stage": "Engaged",
+                "portal_active": True,
+                "last_portal_activity_at": datetime.utcnow().isoformat() + "Z",
+            })
+    elif event_type == "AUTHENTISIGN_BBA_SIGNED":
+        if client_id:
+            await _direct_update_contact({
+                "contact_id": client_id,
+                "role": "Buyer",
+                "lifecycle_stage": "Active Client",
+                "bba_signed": True,
+                "bba_signed_date": datetime.utcnow().strftime("%Y-%m-%d"),
+            })
+    elif event_type == "AUTHENTISIGN_LISTING_SIGNED":
+        if client_id:
+            await _direct_update_contact({
+                "contact_id": client_id,
+                "role": "Seller",
+                "lifecycle_stage": "Active Client",
+                "bba_signed": True,
+                "bba_signed_date": datetime.utcnow().strftime("%Y-%m-%d"),
+            })
+        if extracted_data.get("property_address"):
+            d_res = await _direct_manage_opportunities({
+                "action": "create",
+                "property_address": extracted_data["property_address"],
+                "deal_type": "Seller",
+                "deal_stage": "ACTIVE_LISTING",
+                "contact_id": client_id,
+            })
+            deal_id = d_res.get("id")
+    elif event_type in ("AUTHENTISIGN_OFFER_DISCLOSURE_SIGNED", "INSPECTION_CONFIRMED"):
+        if extracted_data.get("property_address"):
+            d_res = await _direct_manage_opportunities({
+                "action": "create",
+                "property_address": extracted_data["property_address"],
+                "deal_type": "Buyer",
+                "deal_stage": "INSPECTION_PHASE" if event_type == "INSPECTION_CONFIRMED" else "UNDER_CONTRACT",
+                "contact_id": client_id,
+                "co_clients": extracted_data.get("client_names"),
+            })
+            deal_id = d_res.get("id")
+    elif event_type == "TRANSACTION_CLOSED":
+        if extracted_data.get("property_address"):
+            d_res = await _direct_manage_opportunities({
+                "action": "update",
+                "name": extracted_data["property_address"],
+                "deal_stage": "CLOSED_WON",
+            })
+            deal_id = d_res.get("id")
+
+    record_processed_communication(
+        message_id=msg_id,
+        source=channel,
+        sender=sender,
+        subject=subject,
+        event_type=event_type,
+        client_name=extracted_data.get("client_names") or (matched_contact.get("name") if matched_contact else None),
+        client_id=client_id,
+        deal_id=deal_id,
+        details=extracted_data,
+    )
+
+    steps.append({
+        "step": "Lifecycle State Update",
+        "agent": "Miles Miller",
+        "action": f"Executed Twenty CRM update (Event: {event_type}, Client: {client_id or 'Matched/Pending'}, Deal: {deal_id or 'None'})",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "status": "ok",
+    })
+
+    duration_ms = int((time.time() - start_ts) * 1000)
+    log_request_flow(
+        flow_id=flow_id,
+        source=f"Communication: {channel}",
+        title=f"Real Estate Ingestion: {event_type}",
+        status="completed",
+        agents_involved=["Silas Drake", "Miles Miller"],
+        steps=steps,
+        payload_preview=payload,
+        result_summary=f"Processed {event_type} for '{sender}' in Twenty CRM",
+        duration_ms=duration_ms,
+    )
+
+    return {
+        "ok": True,
+        "event_type": event_type,
+        "client_id": client_id,
+        "deal_id": deal_id,
+        "extracted": extracted_data,
+        "duration_ms": duration_ms,
+    }
+
