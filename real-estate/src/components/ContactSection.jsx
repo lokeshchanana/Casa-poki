@@ -85,7 +85,7 @@ export default function ContactSection() {
     } catch (err) {
       console.error('Contact submission error:', err);
       setErrorMessage(
-        'Unable to send inquiry automatically at this moment. Please call or text (801) 860-1052 directly, or email lokeshchanana@outlook.com.'
+        'Unable to send inquiry automatically at this moment. Please call or text (801) 860-1052 directly, or email hello@lokeshchanana.com.'
       );
     } finally {
       setIsSubmitting(false);
@@ -135,13 +135,13 @@ export default function ContactSection() {
                 </div>
               </a>
 
-              <a href="mailto:lokeshchanana@outlook.com" className="flex items-center gap-6 group">
+              <a href="mailto:hello@lokeshchanana.com" className="flex items-center gap-6 group">
                 <div className="p-4 border border-silver/40 dark:border-silver/20 text-charcoal dark:text-silver group-hover:bg-charcoal group-hover:text-ivory dark:group-hover:bg-silver dark:group-hover:text-charcoal transition-colors">
                   <Mail className="w-5 h-5" />
                 </div>
                 <div>
                   <p className="text-[10px] uppercase tracking-widest text-silver-dark font-bold">Email</p>
-                  <p className="text-sm font-sans font-medium text-charcoal dark:text-silver">lokeshchanana@outlook.com</p>
+                  <p className="text-sm font-sans font-medium text-charcoal dark:text-silver">hello@lokeshchanana.com</p>
                 </div>
               </a>
               

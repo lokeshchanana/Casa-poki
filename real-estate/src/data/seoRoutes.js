@@ -64,7 +64,7 @@ export const SEO_ROUTES = {
       {
         question: 'How can I contact Lokesh Chanana for a home valuation or buyer consultation?',
         answer:
-          'You can call or text Loki directly at (801) 860-1052, email lokeshchanana@outlook.com, or submit a request through the contact form at lokeshchanana.com.'
+          'You can call or text Loki directly at (801) 860-1052, email hello@lokeshchanana.com, or submit a request through the contact form at lokeshchanana.com.'
       }
     ]
   },

@@ -788,7 +788,7 @@ export default function OpenHouseSignIn({ onOpenCrm }) {
                     <h2 className="text-xl font-serif font-bold text-black">Lokesh Chanana</h2>
                     <span className="bg-cyan-100 text-cyan-800 text-[10px] font-bold px-2 py-0.5 rounded">Loki</span>
                   </div>
-                  <p className="text-xs text-black/80 font-mono mt-0.5">Lokeshchanana@outlook.com</p>
+                  <p className="text-xs text-black/80 font-mono mt-0.5">hello@lokeshchanana.com</p>
                   <p className="text-xs text-black/80 font-mono">(801) 860-1052</p>
                   <p className="text-xs font-semibold text-black/90">Lakhani Team • Real Broker LLC</p>
                   {propertyAddress && (

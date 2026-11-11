@@ -36,7 +36,7 @@ vcard_lines = [
     "TITLE:Real Estate Broker",
     "ORG:Real Broker LLC",
     "TEL;TYPE=CELL,VOICE,pref:+1-801-860-1052",
-    "EMAIL;TYPE=INTERNET,WORK,pref:lokeshchanana@outlook.com",
+    "EMAIL;TYPE=INTERNET,WORK,pref:hello@lokeshchanana.com",
     "URL;TYPE=Website,WORK,pref:https://lokeshchanana.com",
     "URL;TYPE=Instagram:https://www.instagram.com/lokeshchanana_re",
     "URL;TYPE=Facebook:https://www.facebook.com/share/19qyi21cjW/",

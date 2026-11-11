@@ -23,7 +23,7 @@ export default function Header() {
       {/* Mobile Top Bar */}
       <div className="md:hidden bg-charcoal dark:bg-black text-ivory dark:text-silver text-xs py-2 px-4 flex justify-between items-center border-b border-silver/20">
         <a href="tel:8018601052" className="flex items-center gap-2"><Phone className="w-3 h-3"/> (801) 860-1052</a>
-        <a href="mailto:lokeshchanana@outlook.com" className="flex items-center gap-2"><Mail className="w-3 h-3"/> Email</a>
+        <a href="mailto:hello@lokeshchanana.com" className="flex items-center gap-2"><Mail className="w-3 h-3"/> Email</a>
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

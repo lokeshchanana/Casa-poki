@@ -204,7 +204,7 @@ function buildSemanticRootHtml(routePath, seo) {
     ${sectionsHtml}
     ${faqsHtml}
     <footer>
-      <p>Contact Lokesh "Loki" Chanana: <a href="tel:+18018601052">(801) 860-1052</a> | <a href="mailto:lokeshchanana@outlook.com">lokeshchanana@outlook.com</a> | <a href="https://share.google/4Ha7jttZI6W7AeiSP">Google Business Profile &amp; Reviews</a> | <a href="https://www.zillow.com/profile/Lokeshchanana_re">Zillow Profile</a></p>
+      <p>Contact Lokesh "Loki" Chanana: <a href="tel:+18018601052">(801) 860-1052</a> | <a href="mailto:hello@lokeshchanana.com">hello@lokeshchanana.com</a> | <a href="https://share.google/4Ha7jttZI6W7AeiSP">Google Business Profile &amp; Reviews</a> | <a href="https://www.zillow.com/profile/Lokeshchanana_re">Zillow Profile</a></p>
       <nav aria-label="Site Directory">
         <a href="/">Home</a> |
         <a href="/about">About Loki</a> |
