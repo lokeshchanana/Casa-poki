@@ -463,6 +463,135 @@ async def call_llm_chat(
 
 
 # =============================================================================
+# Dynamic Context-Shift History Pruning
+# =============================================================================
+
+def detect_message_domain(text: str) -> str:
+    """
+    Identifies the semantic topic domain of a message to detect context shifts.
+    Domains:
+      - INFRA_TELEMETRY: Docker, containers, Uptime Kuma, monitors, health checks, ports, Ian Torres, logs, self-healing.
+      - CRM_CONTACTS: Twenty CRM, contacts, leads, clients, phone numbers, email, Miles Miller, people, create/update contact.
+      - FINANCE_ACCOUNTING: Bigcapital, bills, invoices, payables, vendors, Fiona Banks, financial dashboard, expenses.
+      - EMAIL_INBOX: Gmail, Silas Drake, unread emails, mailman, triage, drafts, mailbox.
+      - REAL_ESTATE_CMA: MLS, comps, property valuation, listings, Carter Hayes, Maya Reyes.
+      - GENERAL_CONVERSATION: Default / greeting / capability checks / simple tests.
+    """
+    if not text:
+        return "GENERAL_CONVERSATION"
+    t = text.lower()
+
+    # 1. Infrastructure & Telemetry keywords
+    infra_kw = [
+        "docker", "container", "containers", "uptime", "kuma", "monitor", "telemetry",
+        "ian torres", "self-healing", "restart", "auto-heal", "daemon", "gateway",
+        "port check", "adguard", "cloudflared", "beszel"
+    ]
+    if any(k in t for k in infra_kw):
+        return "INFRA_TELEMETRY"
+
+    # 2. Finance & Bigcapital keywords
+    finance_kw = [
+        "bigcapital", "fiona banks", "bill", "bills", "invoice", "invoices",
+        "accounts payable", "vendor", "vendors", "payable", "financial dashboard",
+        "expenses", "cost till now", "payable"
+    ]
+    if any(k in t for k in finance_kw):
+        return "FINANCE_ACCOUNTING"
+
+    # 3. Email & Silas Drake keywords
+    email_kw = [
+        "silas", "mailman", "inbox", "unread email", "unread emails", "read emails",
+        "check emails", "incoming email", "incoming emails", "email triage",
+        "draft email", "lokesh@lokeshchanana.com"
+    ]
+    if any(k in t for k in email_kw):
+        return "EMAIL_INBOX"
+
+    # 4. CRM & Contact keywords
+    crm_kw = [
+        "crm", "contact", "contacts", "twenty", "twenty crm", "miles miller",
+        "lead", "leads", "phone number", "can_email", "jim", "beidatsch",
+        "person", "people", "customer", "search_contacts", "update_contact"
+    ]
+    if any(k in t for k in crm_kw):
+        return "CRM_CONTACTS"
+
+    # 5. Real Estate & CMA keywords
+    cma_kw = [
+        "cma", "mls", "comps", "comparable", "valuation", "carter hayes",
+        "maya reyes", "listing", "listings", "marketing campaign"
+    ]
+    if any(k in t for k in cma_kw):
+        return "REAL_ESTATE_CMA"
+
+    return "GENERAL_CONVERSATION"
+
+
+def prepare_pruned_history(
+    history: List[Dict[str, Any]],
+    current_user_query: str,
+    max_char_threshold: int = 500,
+) -> List[Dict[str, Any]]:
+    """
+    Intelligently prunes chat history ONLY when a context shift is detected.
+    - If the user is continuing the SAME domain/topic, history is retained unpruned so multi-turn context is complete.
+    - If the user has shifted to a DIFFERENT domain, prior bulky messages (> max_char_threshold)
+      from the old domain are condensed to an executive summary, preventing prompt token explosion.
+    """
+    if not history:
+        return []
+
+    curr_domain = detect_message_domain(current_user_query)
+    pruned: List[Dict[str, Any]] = []
+
+    for item in history:
+        role = item.get("role")
+        content = item.get("content") or ""
+
+        # User messages are preserved as-is; short assistant messages stay unpruned
+        if role != "assistant" or len(content) <= max_char_threshold:
+            pruned.append({"role": role, "content": content})
+            continue
+
+        item_domain = detect_message_domain(content)
+
+        # Context shift condition: current query has an active domain that is DIFFERENT from this historical item's domain
+        is_context_shift = (
+            curr_domain != "GENERAL_CONVERSATION"
+            and item_domain != "GENERAL_CONVERSATION"
+            and curr_domain != item_domain
+        )
+
+        if is_context_shift:
+            # Condense the bulky message to a concise executive summary
+            lines = [l.strip() for l in content.split("\n") if l.strip()]
+            summary_header = lines[0] if lines else "Historical execution report"
+
+            condensed_snippet = ""
+            for l in lines[1:5]:
+                if l.startswith("-") or l.startswith("*") or l.startswith("#"):
+                    condensed_snippet += f"\n{l[:100]}"
+            if not condensed_snippet and len(lines) > 1:
+                condensed_snippet = f"\n{lines[1][:120]}..."
+
+            condensed_content = (
+                f"{summary_header}{condensed_snippet}\n"
+                f"*(Note: Prior {item_domain} details condensed due to context shift to {curr_domain})*"
+            )
+            pruned.append({"role": role, "content": condensed_content})
+            logger.info(
+                f"Pruned historical message ({len(content)} -> {len(condensed_content)} chars) "
+                f"due to context shift: {item_domain} -> {curr_domain}"
+            )
+        else:
+            # Same topic or neutral context: preserve full detail
+            pruned.append({"role": role, "content": content})
+
+    return pruned
+
+
+# =============================================================================
 # Multi-Agent Pipeline Runner
 # =============================================================================
 
@@ -626,8 +755,9 @@ async def run_multi_agent_pipeline(
         ]
         memory_context_block = "\nRelevant Vector Memories from Brain:\n" + "\n".join(memory_lines) + "\n"
 
-    # Load historical context
-    history = get_chat_history(session_id, limit=6)
+    # Load historical context and dynamically prune ONLY when context has shifted
+    raw_history = get_chat_history(session_id, limit=6)
+    history = prepare_pruned_history(raw_history, user_message)
     lessons = [l["rule"] for l in get_lessons()[:8]]
     lessons_block = ("\nActive Lessons:\n" + "\n".join(f"- {r}" for r in lessons)) if lessons else ""
 

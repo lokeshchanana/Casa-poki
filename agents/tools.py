@@ -95,6 +95,16 @@ TOOL_SCHEMAS = [
                         "type": "integer",
                         "description": "Maximum number of contacts to return (default 50, use up to 500 for counts).",
                     },
+                    "sort_by": {
+                        "type": "string",
+                        "enum": ["created_at", "updated_at", "name"],
+                        "description": "Sort field. Default 'created_at' so newest/recent records appear first.",
+                    },
+                    "order": {
+                        "type": "string",
+                        "enum": ["desc", "asc"],
+                        "description": "Sort direction. Default 'desc' so newest/last records appear first.",
+                    },
                     "count_mode": {
                         "type": "boolean",
                         "description": "Set to true if user is asking 'how many' or count inquiries.",
@@ -139,6 +149,10 @@ TOOL_SCHEMAS = [
                     "target_name": {
                         "type": "string",
                         "description": "Full name of the contact to update if ID is unknown",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "New full name for the contact (if renaming)",
                     },
                     "phone_number": {"type": "string", "description": "New phone number"},
                     "email": {"type": "string", "description": "New email address"},
@@ -497,8 +511,21 @@ async def _direct_search_contacts(args: Dict[str, Any]) -> Dict[str, Any]:
             "market": p.get("market") or "",
             "created_at": p.get("createdAt") or "",
             "created_date": (p.get("createdAt") or "")[:10],
+            "updated_at": p.get("updatedAt") or "",
         }
         mapped_contacts.append(c_obj)
+
+    # Sort contacts by created_at descending by default so recent contacts appear first
+    sort_by = (args.get("sort_by") or "created_at").lower()
+    order = (args.get("order") or "desc").lower()
+    if sort_by in ("created_at", "date", "created"):
+        mapped_contacts.sort(key=lambda c: c.get("created_at") or "", reverse=(order != "asc"))
+    elif sort_by in ("updated_at", "updated", "recent_update"):
+        mapped_contacts.sort(key=lambda c: c.get("updated_at") or "", reverse=(order != "asc"))
+    elif sort_by == "name":
+        mapped_contacts.sort(key=lambda c: (c.get("name") or "").lower(), reverse=(order == "desc"))
+    else:
+        mapped_contacts.sort(key=lambda c: c.get("created_at") or "", reverse=True)
         
     # Keyword filtering (ignore generic semantic query noise and inline filters like can_email:true)
     generic_query_patterns = [
@@ -596,6 +623,13 @@ async def _direct_update_contact(args: Dict[str, Any]) -> Dict[str, Any]:
         target_id = contacts[0]["id"]
         
     update_payload: Dict[str, Any] = {}
+    new_name = (args.get("name") or args.get("new_name") or "").strip()
+    if new_name:
+        parts = new_name.split(" ", 1)
+        update_payload["name"] = {
+            "firstName": parts[0],
+            "lastName": parts[1] if len(parts) > 1 else "",
+        }
     if args.get("phone_number"):
         clean_phone = re.sub(r"[^0-9+]", "", str(args["phone_number"]))
         update_payload["phones"] = {"primaryPhoneNumber": clean_phone}
@@ -614,7 +648,9 @@ async def _direct_update_contact(args: Dict[str, Any]) -> Dict[str, Any]:
         "tool": "update_contact",
         "direct": True,
         "updated_id": target_id,
-        "message": "Contact updated successfully in Twenty CRM.",
+        "name": new_name or target_name,
+        "fields_updated": list(update_payload.keys()),
+        "message": f"Contact '{new_name or target_name}' updated successfully in Twenty CRM.",
     }
 
 
@@ -1103,7 +1139,14 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
             count_line = "### CRM Contact Count: **0 matching contacts found**\n" if is_count else ""
             return f"{count_line}### CRM Contact Search\nNo matching contacts found in Twenty CRM{filter_str}."
 
-        title = f"### CRM Contact Count: **{total} matching contacts found**{filter_str}" if is_count else f"### CRM Contacts (`{total}` verified records{filter_str})"
+        req_limit = args.get("limit") or (result.get("raw_payload_sent") or {}).get("limit")
+        if is_count:
+            title = f"### CRM Contact Count: **{total} matching contacts found**{filter_str}"
+        elif req_limit and len(contacts) < total:
+            title = f"### CRM Contacts (Showing {len(contacts)} of {total} verified records{filter_str})"
+        else:
+            title = f"### CRM Contacts (`{total}` verified records{filter_str})"
+
         lines = [f"{title}\n"]
         for c in contacts[:50]:
             lines.append(
@@ -1111,8 +1154,8 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
                 f"  - Phone: `{c.get('phone') or 'N/A'}` | Email: `{c.get('email') or 'N/A'}`\n"
                 f"  - Role: `{c.get('role') or 'Customer'}` | Can Email: `{c.get('can_email')}` | Market: `{c.get('market') or 'N/A'}`"
             )
-        if total > 50:
-            lines.append(f"\n*...and {total - 50} more records.*")
+        if total > len(contacts) and not req_limit and total > 50:
+            lines.append(f"\n*...and {total - len(contacts)} more records.*")
         return "\n".join(lines)
 
     if tool_name == "create_contact":
@@ -1124,9 +1167,15 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
         )
 
     if tool_name == "update_contact":
+        contact_name = result.get("name") or args.get("name") or args.get("new_name") or args.get("target_name")
+        contact_id = result.get("updated_id") or args.get("contact_id")
+        fields_updated = result.get("fields_updated") or []
+        fields_line = f"- **Updated Fields:** `{', '.join(fields_updated)}`\n" if fields_updated else ""
+        name_line = f"- **Contact:** **{contact_name}** (ID: `{contact_id}`)\n" if contact_name else f"- **Contact ID:** `{contact_id}`\n"
         return (
             f"### Contact Updated in Twenty CRM (Direct REST)\n"
-            f"- **Name / ID:** `{result.get('updated_id') or args.get('contact_id') or args.get('target_name')}`\n"
+            f"{name_line}"
+            f"{fields_line}"
             f"- **Status:** {result.get('message', 'Updated successfully')}"
         )
 
