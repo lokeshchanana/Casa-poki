@@ -74,9 +74,26 @@ You verify outputs, enforce the strict Zero Stray Communications policy, ensure 
     },
     "intake": {
         "name": "Miles Miller",
-        "role": "Client Intake & Communications",
-        "system_prompt": """You are Miles Miller, Client Intake Specialist.
-You focus on Open House check-ins, visitor inquiries, prompt CRM lead capture, and greeting new clients with warmth and accuracy.""",
+        "role": "Client Intake & CRM Lifecycle Specialist",
+        "system_prompt": """You are Miles Miller, Client Intake & CRM Lifecycle Specialist for Lokesh Chanana Real Estate.
+You manage Twenty CRM contacts, lifecycle stage transitions, and deals (opportunities) based on real estate events.
+
+LIFECYCLE & DEAL RULES:
+1. Stage Hierarchy: Lead (1) -> Engaged (2) -> Active Client (3) -> Pending (4) -> Past Client (5).
+   Never downgrade an Active Client or Pending client to Engaged when they browse or view portal links.
+2. BBA / Listing Agreements:
+   - When Form 41 BBA is signed: Set role='Buyer', lifecycle_stage='Active Client', bba_signed=true.
+   - When Form 1A Listing is signed: Set role='Seller', lifecycle_stage='Active Client', create Seller deal.
+3. Offers & Deals:
+   - When an offer is submitted: Create or update deal (deal_stage='OFFER_SUBMITTED'). Contact stays Active Client.
+   - When mutually accepted (under contract): Set deal_stage='UNDER_CONTRACT', contact lifecycle_stage='Pending'.
+   - Co-Clients: If couples or partners are buying/selling (e.g. Jim & Lola), link both on the deal and partnerName.
+   - Fall-Through / Terminated: If an offer is rejected or terminated (Form 35), set deal_stage='TERMINATED', revert contact to 'Active Client'.
+4. Closing & Past Clients:
+   - When transaction closes (Title/Escrow recording): Set deal_stage='CLOSED_WON', contact lifecycle_stage='Past Client'.
+   - If Buyer: Set past_client_type='Buyer', home_maintenance_tips=true.
+   - If Seller: Set past_client_type='Seller', home_maintenance_tips=false (no maintenance tips for sold homes).
+5. Non-Client Emails: Listing agents, lenders, inspectors, and escrow officers must NEVER be converted to Buyer/Seller clients.""",
     },
     "finance": {
         "name": "Fiona Banks",
@@ -123,8 +140,14 @@ M: (801) 860-1052 | E: lokesh@lokeshchanana.com
 Web: lokeshchanana.com
 
 You do not make independent business decisions; your sole mission is to reliably fetch, inspect, and present clean emails to Marcus Vance so he can decide what needs to be done:
+- Real Estate Lifecycle & Deal Communications:
+  * NWMLS Auto-Email setup / search notifications (from nwmls@nwmlsmatrixmail.com) -> Handed off to Miles Miller to activate search and set stage to Engaged.
+  * NWMLS Portal activity / client views -> Handed off to Miles Miller to update last activity and portal status without downgrading higher stages.
+  * Authentisign signed agreements (secure@authentisign.com) -> Identify BBA (Form 41), Listing (Form 1A), or Purchase Agreement (Form 21) and hand off to Miles Miller.
+  * Offer submissions & disclosures (e.g. for Jim and Lola - 8610 63rd Ave E) -> Extract property address, clients, dates, and hand off to Miles Miller.
+  * Inspection confirmations & Escrow/Title closing confirmations -> Hand off to Miles Miller to update deal milestones and execute closing.
 - Finance emails (bills, invoices, payment receipts, taxes) -> Handed off to Fiona Banks (Finance).
-- CRM related emails (buyer/seller inquiries, client leads, contact info updates) -> Handed off to Miles Miller (Intake) or recorded directly into Twenty CRM.
+- CRM related emails (buyer/seller inquiries, client leads, contact info updates) -> Handed off to Miles Miller (Intake).
 - CMA & property valuation inquiries -> Handed off to Carter Hayes (CMA).
 - Marketing & promotional opportunities -> Handed off to Maya Reyes (Marketing).
 - IT & infrastructure alerts -> Handed off to Ian Torres (IT).
@@ -860,13 +883,30 @@ async def run_multi_agent_pipeline(
                 },
             ]
 
+            crm_tools = [
+                t for t in TOOL_SCHEMAS
+                if t["function"]["name"] in (
+                    "search_contacts",
+                    "create_contact",
+                    "update_contact",
+                    "delete_contact",
+                    "manage_notes",
+                    "manage_tasks",
+                    "manage_opportunities",
+                )
+            ]
+
             spec_tools = (
                 [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("finance_")]
                 if target_agent == "finance"
                 else (
                     [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("mailman_")]
                     if target_agent == "mailman"
-                    else None
+                    else (
+                        crm_tools
+                        if target_agent in ("intake", "manager")
+                        else None
+                    )
                 )
             )
 

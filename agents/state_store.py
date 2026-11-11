@@ -143,6 +143,24 @@ def init_store() -> None:
             seed_lessons,
         )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS processed_communications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_id TEXT UNIQUE NOT NULL,
+            source TEXT NOT NULL,
+            sender TEXT,
+            subject TEXT,
+            event_type TEXT,
+            client_name TEXT,
+            client_id TEXT,
+            deal_id TEXT,
+            details TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+
     conn.commit()
     conn.close()
 
@@ -851,4 +869,46 @@ def get_office_floor_state() -> Dict[str, Any]:
         "agents": agents_state,
         "recent_flows": flows,
     }
+
+
+def is_communication_processed(message_id: str) -> bool:
+    if not message_id:
+        return False
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM processed_communications WHERE message_id = ?", (message_id,))
+    row = cur.fetchone()
+    conn.close()
+    return bool(row)
+
+
+def record_processed_communication(
+    message_id: str,
+    source: str,
+    sender: str,
+    subject: str,
+    event_type: str,
+    client_name: Optional[str] = None,
+    client_id: Optional[str] = None,
+    deal_id: Optional[str] = None,
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    if not message_id:
+        return
+    init_store()
+    now = datetime.utcnow().isoformat() + "Z"
+    details_str = json.dumps(details or {}) if isinstance(details, dict) else str(details or "")
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT OR REPLACE INTO processed_communications 
+        (message_id, source, sender, subject, event_type, client_name, client_id, deal_id, details, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (message_id, source, sender, subject, event_type, client_name, client_id, deal_id, details_str, now),
+    )
+    conn.commit()
+    conn.close()
 

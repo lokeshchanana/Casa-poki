@@ -592,8 +592,25 @@ async def _direct_create_contact(args: Dict[str, Any]) -> Dict[str, Any]:
     if args.get("email"):
         payload["emails"] = {"primaryEmail": args["email"].strip()}
     if args.get("phone_number"):
-        clean_phone = re.sub(r"[^0-9+]", "", str(args["phone_number"]))
-        payload["phones"] = {"primaryPhoneNumber": clean_phone}
+        digits = re.sub(r"[^0-9]", "", str(args["phone_number"]))
+        if len(digits) == 10:
+            payload["phones"] = {
+                "primaryPhoneCallingCode": "+1",
+                "primaryPhoneCountryCode": "US",
+                "primaryPhoneNumber": digits,
+            }
+        elif len(digits) == 11 and digits.startswith("1"):
+            payload["phones"] = {
+                "primaryPhoneCallingCode": "+1",
+                "primaryPhoneCountryCode": "US",
+                "primaryPhoneNumber": digits[1:],
+            }
+        else:
+            payload["phones"] = {
+                "primaryPhoneCallingCode": "+1",
+                "primaryPhoneCountryCode": "US",
+                "primaryPhoneNumber": digits,
+            }
         
     res = await crm_post("/rest/people", payload)
     new_person = res.get("data", {}).get("createPerson", {})
@@ -631,13 +648,74 @@ async def _direct_update_contact(args: Dict[str, Any]) -> Dict[str, Any]:
             "lastName": parts[1] if len(parts) > 1 else "",
         }
     if args.get("phone_number"):
-        clean_phone = re.sub(r"[^0-9+]", "", str(args["phone_number"]))
-        update_payload["phones"] = {"primaryPhoneNumber": clean_phone}
+        digits = re.sub(r"[^0-9]", "", str(args["phone_number"]))
+        clean_digits = digits[1:] if len(digits) == 11 and digits.startswith("1") else digits
+        update_payload["phones"] = {
+            "primaryPhoneCallingCode": "+1",
+            "primaryPhoneCountryCode": "US",
+            "primaryPhoneNumber": clean_digits,
+        }
     if args.get("email"):
         update_payload["emails"] = {"primaryEmail": args["email"].strip()}
     if args.get("can_email") is not None:
         can_bool = str(args["can_email"]).lower() in ("true", "1", "yes")
         update_payload["canEmail"] = can_bool
+
+    # Real Estate Lifecycle & Representation Fields
+    if args.get("role"):
+        update_payload["contactRole"] = args["role"].strip()
+    if args.get("partner_name"):
+        update_payload["partnerName"] = args["partner_name"].strip()
+    if args.get("primary_property_address"):
+        update_payload["primaryPropertyAddress"] = args["primary_property_address"].strip()
+    if args.get("search_active") is not None:
+        update_payload["searchActive"] = str(args["search_active"]).lower() in ("true", "1", "yes")
+    if args.get("portal_active") is not None:
+        update_payload["portalActive"] = str(args["portal_active"]).lower() in ("true", "1", "yes")
+    if args.get("last_portal_activity_at"):
+        update_payload["lastPortalActivityAt"] = args["last_portal_activity_at"]
+    if args.get("bba_signed") is not None:
+        update_payload["bbaSigned"] = str(args["bba_signed"]).lower() in ("true", "1", "yes")
+    if args.get("bba_signed_date"):
+        update_payload["bbaSignedDate"] = args["bba_signed_date"]
+    if args.get("bba_expiration_date"):
+        update_payload["bbaExpirationDate"] = args["bba_expiration_date"]
+    if args.get("past_client_type"):
+        update_payload["pastClientType"] = args["past_client_type"].strip()
+    if args.get("home_maintenance_tips") is not None:
+        update_payload["homeMaintenanceTips"] = str(args["home_maintenance_tips"]).lower() in ("true", "1", "yes")
+
+    # Lifecycle Stage with Regression Guardrails
+    new_stage = args.get("lifecycle_stage")
+    if new_stage:
+        clean_new = new_stage.strip()
+        stage_hierarchy = {
+            "lead": 1,
+            "engaged": 2,
+            "active client": 3,
+            "pending": 4,
+            "past client": 5,
+        }
+        force_override = args.get("force_stage_update", False)
+        if not force_override:
+            try:
+                curr_res = await crm_get(f"/rest/people/{target_id}")
+                curr_person = curr_res.get("data", {}).get("person") or {}
+                curr_stage = (curr_person.get("lifecycleStage") or "Lead").strip().lower()
+                curr_rank = stage_hierarchy.get(curr_stage, 1)
+                new_rank = stage_hierarchy.get(clean_new.lower(), 1)
+                # Guardrail: Prevent downgrading unless explicitly forced
+                if new_rank < curr_rank and curr_rank != 5:
+                    logger.info(
+                        f"Stage regression prevented for {target_id}: '{curr_stage}' ({curr_rank}) -> '{clean_new}' ({new_rank}). Retaining current stage."
+                    )
+                else:
+                    update_payload["lifecycleStage"] = clean_new
+            except Exception as e:
+                logger.warning(f"Could not check current stage for regression guardrail: {e}")
+                update_payload["lifecycleStage"] = clean_new
+        else:
+            update_payload["lifecycleStage"] = clean_new
         
     if not update_payload:
         return {"ok": False, "tool": "update_contact", "error": "No fields specified to update."}
@@ -799,6 +877,187 @@ async def _direct_manage_tasks(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def _direct_manage_opportunities(args: Dict[str, Any]) -> Dict[str, Any]:
+    action = args.get("action", "list").lower()
+
+    if action == "create":
+        name = args.get("name")
+        property_address = args.get("property_address") or name
+        if not property_address:
+            return {"ok": False, "tool": "manage_opportunities", "error": "Property address or name is required."}
+
+        contact_id = args.get("contact_id")
+        if not contact_id and args.get("target_name"):
+            search_res = await _direct_search_contacts({"query": args["target_name"]})
+            contacts = search_res.get("contacts", [])
+            if contacts:
+                contact_id = contacts[0]["id"]
+
+        deal_type = args.get("deal_type", "Buyer")
+        deal_stage = args.get("deal_stage", "OFFER_SUBMITTED" if deal_type == "Buyer" else "ACTIVE_LISTING")
+
+        stage_mapping = {
+            "SHOWING_PREP": "NEW",
+            "ACTIVE_LISTING": "SCREENING",
+            "OFFER_SUBMITTED": "PROPOSAL",
+            "UNDER_CONTRACT": "MEETING",
+            "INSPECTION_PHASE": "MEETING",
+            "CLOSED_WON": "CUSTOMER",
+            "TERMINATED": "NEW",
+        }
+        enum_stage = stage_mapping.get(deal_stage.upper(), "PROPOSAL")
+
+        payload: Dict[str, Any] = {
+            "name": f"[{deal_type}] {property_address}",
+            "dealType": deal_type,
+            "dealStage": deal_stage,
+            "propertyAddress": property_address,
+            "stage": enum_stage,
+        }
+        if contact_id:
+            payload["pointOfContactId"] = contact_id
+        if args.get("co_clients"):
+            payload["coClients"] = args["co_clients"]
+        if args.get("offer_date"):
+            payload["offerDate"] = args["offer_date"]
+        if args.get("mutual_acceptance_date"):
+            payload["mutualAcceptanceDate"] = args["mutual_acceptance_date"]
+        if args.get("inspection_date"):
+            payload["inspectionDate"] = args["inspection_date"]
+        if args.get("close_date"):
+            payload["closeDate"] = args["close_date"]
+        if args.get("escrow_company"):
+            payload["escrowCompany"] = args["escrow_company"]
+        if args.get("amount"):
+            try:
+                amt = float(args["amount"])
+                payload["amount"] = {"amountMicros": int(amt * 1_000_000), "currencyCode": "USD"}
+            except Exception:
+                pass
+
+        res = await crm_post("/rest/opportunities", payload)
+        new_opp = res.get("data", {}).get("createOpportunity", {})
+        opp_id = new_opp.get("id")
+
+        # Promote contact stage to Pending if Under Contract or keep Active Client
+        if contact_id:
+            try:
+                contact_stage = "Pending" if deal_stage in ("UNDER_CONTRACT", "INSPECTION_PHASE") else "Active Client"
+                patch_payload = {
+                    "primaryPropertyAddress": property_address,
+                    "lifecycleStage": contact_stage,
+                }
+                if deal_type:
+                    patch_payload["contactRole"] = deal_type
+                await crm_patch(f"/rest/people/{contact_id}", patch_payload)
+            except Exception as e:
+                logger.warning(f"Could not update primary contact stage: {e}")
+
+        return {
+            "ok": True,
+            "tool": "manage_opportunities",
+            "action": "create",
+            "id": opp_id,
+            "name": payload["name"],
+            "deal": new_opp,
+            "message": f"Deal '{payload['name']}' created successfully in Twenty CRM.",
+        }
+
+    elif action == "update":
+        opp_id = args.get("opportunity_id") or args.get("id")
+        if not opp_id and args.get("name"):
+            # Search by name
+            raw_res = await crm_get("/rest/opportunities?limit=50")
+            for o in raw_res.get("data", {}).get("opportunities", []):
+                if args["name"].lower() in (o.get("name") or "").lower():
+                    opp_id = o.get("id")
+                    break
+
+        if not opp_id:
+            return {"ok": False, "tool": "manage_opportunities", "error": "Opportunity ID or name is required."}
+
+        patch_payload: Dict[str, Any] = {}
+        if args.get("property_address"):
+            patch_payload["propertyAddress"] = args["property_address"]
+        if args.get("deal_type"):
+            patch_payload["dealType"] = args["deal_type"]
+        if args.get("co_clients"):
+            patch_payload["coClients"] = args["co_clients"]
+        if args.get("offer_date"):
+            patch_payload["offerDate"] = args["offer_date"]
+        if args.get("mutual_acceptance_date"):
+            patch_payload["mutualAcceptanceDate"] = args["mutual_acceptance_date"]
+        if args.get("inspection_date"):
+            patch_payload["inspectionDate"] = args["inspection_date"]
+        if args.get("close_date"):
+            patch_payload["closeDate"] = args["close_date"]
+        if args.get("escrow_company"):
+            patch_payload["escrowCompany"] = args["escrow_company"]
+        if args.get("amount"):
+            try:
+                amt = float(args["amount"])
+                patch_payload["amount"] = {"amountMicros": int(amt * 1_000_000), "currencyCode": "USD"}
+            except Exception:
+                pass
+
+        deal_stage = args.get("deal_stage")
+        if deal_stage:
+            patch_payload["dealStage"] = deal_stage
+            stage_mapping = {
+                "SHOWING_PREP": "NEW",
+                "ACTIVE_LISTING": "SCREENING",
+                "OFFER_SUBMITTED": "PROPOSAL",
+                "UNDER_CONTRACT": "MEETING",
+                "INSPECTION_PHASE": "MEETING",
+                "CLOSED_WON": "CUSTOMER",
+                "TERMINATED": "NEW",
+            }
+            patch_payload["stage"] = stage_mapping.get(deal_stage.upper(), "PROPOSAL")
+
+        res = await crm_patch(f"/rest/opportunities/{opp_id}", patch_payload)
+
+        # Handle Fall-Through Protocol or Closing Synchronization
+        if deal_stage:
+            try:
+                opp_details = await crm_get(f"/rest/opportunities/{opp_id}")
+                opp_data = opp_details.get("data", {}).get("opportunity", {})
+                poc_id = opp_data.get("pointOfContactId")
+                dtype = opp_data.get("dealType") or "Buyer"
+                addr = opp_data.get("propertyAddress") or opp_data.get("name")
+
+                if poc_id:
+                    if deal_stage == "TERMINATED":
+                        # Revert contact back to Active Client
+                        await crm_patch(f"/rest/people/{poc_id}", {"lifecycleStage": "Active Client"})
+                        logger.info(f"Fall-through protocol: Reverted contact '{poc_id}' to 'Active Client'.")
+                    elif deal_stage == "CLOSED_WON":
+                        # Mark contact as Past Client with Buyer/Seller segmentation
+                        past_type = "Buyer" if "buyer" in dtype.lower() else "Seller"
+                        is_maint_tips = (past_type == "Buyer")
+                        await crm_patch(
+                            f"/rest/people/{poc_id}",
+                            {
+                                "lifecycleStage": "Past Client",
+                                "pastClientType": past_type,
+                                "homeMaintenanceTips": is_maint_tips,
+                                "primaryPropertyAddress": addr,
+                            },
+                        )
+                        logger.info(
+                            f"Closing finalized: Contact '{poc_id}' marked as Past Client ({past_type}, maintenance_tips={is_maint_tips})."
+                        )
+            except Exception as e:
+                logger.warning(f"Error handling post-deal stage synchronization: {e}")
+
+        return {
+            "ok": True,
+            "tool": "manage_opportunities",
+            "action": "update",
+            "id": opp_id,
+            "updated_fields": list(patch_payload.keys()),
+            "message": f"Deal '{opp_id}' updated successfully in Twenty CRM.",
+        }
+
+    # Default: List deals
     raw_res = await crm_get("/rest/opportunities?limit=50&order=createdAt:desc")
     opps_list = raw_res.get("data", {}).get("opportunities", [])
     mapped_opps = [
@@ -806,14 +1065,21 @@ async def _direct_manage_opportunities(args: Dict[str, Any]) -> Dict[str, Any]:
             "id": o.get("id"),
             "name": o.get("name"),
             "contact_id": o.get("pointOfContactId"),
-            "stage": o.get("stage"),
+            "deal_type": o.get("dealType"),
+            "deal_stage": o.get("dealStage"),
+            "property_address": o.get("propertyAddress"),
+            "co_clients": o.get("coClients"),
             "close_date": o.get("closeDate"),
+            "offer_date": o.get("offerDate"),
+            "inspection_date": o.get("inspectionDate"),
+            "stage": o.get("stage"),
         }
         for o in opps_list
     ]
     return {
         "ok": True,
         "tool": "manage_opportunities",
+        "action": "list",
         "direct": True,
         "total": len(mapped_opps),
         "opportunities": mapped_opps,
@@ -860,6 +1126,8 @@ async def _execute_mailman_inbox(args: Dict[str, Any]) -> Dict[str, Any]:
             import email
             import imaplib
             from email.header import decode_header
+            from bs4 import BeautifulSoup
+            from state_store import is_communication_processed, record_processed_communication
 
             mail = imaplib.IMAP4_SSL("imap.gmail.com", 993)
             mail.login(imap_user, imap_pass.replace(" ", ""))
@@ -868,10 +1136,13 @@ async def _execute_mailman_inbox(args: Dict[str, Any]) -> Dict[str, Any]:
             mail_ids = messages[0].split()
             emails = []
             for mid in mail_ids[-limit:]:
-                res, msg_data = mail.fetch(mid, "(RFC822)")
+                # Use BODY.PEEK[] so Silas reads without unintentionally clearing unread status
+                res, msg_data = mail.fetch(mid, "(BODY.PEEK[])")
                 for response_part in msg_data:
                     if isinstance(response_part, tuple):
                         msg = email.message_from_bytes(response_part[1])
+                        
+                        # Headers
                         raw_sub = msg.get("Subject", "")
                         decoded_list = decode_header(raw_sub)
                         subject = ""
@@ -879,27 +1150,58 @@ async def _execute_mailman_inbox(args: Dict[str, Any]) -> Dict[str, Any]:
                             sub_bytes, enc = decoded_list[0]
                             subject = sub_bytes.decode(enc or "utf-8", errors="ignore") if isinstance(sub_bytes, bytes) else str(sub_bytes)
                         from_ = msg.get("From", "Unknown")
+                        to_ = msg.get("To", "")
+                        cc_ = msg.get("Cc", "")
                         date_ = msg.get("Date", "")
-                        body = ""
+                        msg_id = msg.get("Message-ID", f"imap_{mid.decode()}")
+
+                        # Body extraction (Plain text or HTML)
+                        plain_text = ""
+                        html_text = ""
                         if msg.is_multipart():
                             for part in msg.walk():
-                                if part.get_content_type() == "text/plain":
+                                ctype = part.get_content_type()
+                                if ctype == "text/plain" and not plain_text:
                                     pl = part.get_payload(decode=True)
                                     if pl:
-                                        body = pl.decode(errors="ignore")[:300]
-                                    break
+                                        plain_text = pl.decode(errors="ignore")[:3000]
+                                elif ctype == "text/html" and not html_text:
+                                    pl = part.get_payload(decode=True)
+                                    if pl:
+                                        try:
+                                            soup = BeautifulSoup(pl.decode(errors="ignore"), "html.parser")
+                                            html_text = soup.get_text(separator=" ", strip=True)[:3000]
+                                        except Exception:
+                                            html_text = pl.decode(errors="ignore")[:3000]
                         else:
                             pl = msg.get_payload(decode=True)
                             if pl:
-                                body = pl.decode(errors="ignore")[:300]
+                                raw_p = pl.decode(errors="ignore")[:3000]
+                                if "<html" in raw_p.lower():
+                                    try:
+                                        soup = BeautifulSoup(raw_p, "html.parser")
+                                        html_text = soup.get_text(separator=" ", strip=True)
+                                    except Exception:
+                                        html_text = raw_p
+                                else:
+                                    plain_text = raw_p
+
+                        body = plain_text or html_text or ""
                         clean_body = re.sub(r"\s+", " ", body).strip()
+                        is_already_processed = is_communication_processed(msg_id)
+
                         emails.append(
                             {
                                 "id": mid.decode(),
+                                "message_id": msg_id,
                                 "sender": from_,
+                                "to": to_,
+                                "cc": cc_,
                                 "subject": subject,
                                 "date": date_,
-                                "snippet": clean_body,
+                                "snippet": clean_body[:500],
+                                "full_text": clean_body,
+                                "is_processed": is_already_processed,
                             }
                         )
             mail.close()

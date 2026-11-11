@@ -24,6 +24,7 @@ from state_store import (
 import vector_memory
 from webhooks import (
     handle_bill_intake,
+    handle_communication_intake,
     handle_open_house_sign_in,
     handle_payment_intake,
     handle_website_contact,
@@ -248,4 +249,14 @@ async def webhook_payment_intake(req: Request) -> JSONResponse:
     except Exception:
         body = {}
     result = await handle_payment_intake(body)
+    return JSONResponse(content=result)
+
+
+@app.post("/webhook/communication-intake")
+async def webhook_communication_intake(req: Request) -> JSONResponse:
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    result = await handle_communication_intake(body)
     return JSONResponse(content=result)
