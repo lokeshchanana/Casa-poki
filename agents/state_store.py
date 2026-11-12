@@ -161,6 +161,41 @@ def init_store() -> None:
         """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS post_close_drips (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            contact_id TEXT NOT NULL UNIQUE,
+            deal_id TEXT,
+            email TEXT NOT NULL,
+            first_name TEXT,
+            last_name TEXT,
+            property_address TEXT,
+            close_date TEXT NOT NULL,
+            is_new_construction INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'ACTIVE',
+            sent_templates TEXT DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS post_close_drip_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            drip_id INTEGER NOT NULL,
+            contact_id TEXT NOT NULL,
+            template_id INTEGER NOT NULL,
+            day_offset INTEGER NOT NULL,
+            sent_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            response_details TEXT
+        )
+        """
+    )
+
     conn.commit()
     conn.close()
 
@@ -911,4 +946,192 @@ def record_processed_communication(
     )
     conn.commit()
     conn.close()
+
+
+# =============================================================================
+# Buyer Post-Close Drip Automation State Helpers
+# =============================================================================
+
+def enroll_post_close_drip(
+    contact_id: str,
+    email: str,
+    first_name: str,
+    last_name: str,
+    property_address: str,
+    close_date: str,
+    is_new_construction: bool = False,
+    deal_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Enrolls or updates a buyer contact into the Post-Close Drip Automation.
+    """
+    init_store()
+    now = datetime.utcnow().isoformat() + "Z"
+    is_new_const_int = 1 if is_new_construction else 0
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        INSERT INTO post_close_drips
+        (contact_id, deal_id, email, first_name, last_name, property_address, close_date, is_new_construction, status, sent_templates, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', '[]', ?, ?)
+        ON CONFLICT(contact_id) DO UPDATE SET
+            deal_id=excluded.deal_id,
+            email=excluded.email,
+            first_name=excluded.first_name,
+            last_name=excluded.last_name,
+            property_address=excluded.property_address,
+            close_date=excluded.close_date,
+            is_new_construction=excluded.is_new_construction,
+            status='ACTIVE',
+            updated_at=excluded.updated_at
+        """,
+        (contact_id, deal_id, email.lower().strip(), first_name, last_name, property_address, close_date, is_new_const_int, now, now),
+    )
+    drip_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    return {
+        "ok": True,
+        "drip_id": drip_id,
+        "contact_id": contact_id,
+        "email": email.lower().strip(),
+        "close_date": close_date,
+        "is_new_construction": bool(is_new_construction),
+        "status": "ACTIVE",
+    }
+
+
+def get_active_post_close_drips() -> List[Dict[str, Any]]:
+    """
+    Returns all active buyer post-close drip enrollments.
+    """
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, contact_id, deal_id, email, first_name, last_name, property_address, 
+               close_date, is_new_construction, status, sent_templates, created_at, updated_at
+        FROM post_close_drips
+        WHERE status = 'ACTIVE'
+        ORDER BY id ASC
+        """
+    )
+    rows = cur.fetchall()
+    conn.close()
+
+    results = []
+    for r in rows:
+        item = dict(r)
+        item["is_new_construction"] = bool(item["is_new_construction"])
+        try:
+            item["sent_templates"] = json.loads(item["sent_templates"])
+        except Exception:
+            item["sent_templates"] = []
+        results.append(item)
+    return results
+
+
+def get_post_close_drip_by_contact(contact_id_or_email: str) -> Optional[Dict[str, Any]]:
+    """
+    Retrieves a drip enrollment by contact_id or email.
+    """
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, contact_id, deal_id, email, first_name, last_name, property_address, 
+               close_date, is_new_construction, status, sent_templates, created_at, updated_at
+        FROM post_close_drips
+        WHERE contact_id = ? OR email = ?
+        LIMIT 1
+        """,
+        (contact_id_or_email, contact_id_or_email.lower().strip()),
+    )
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return None
+    item = dict(row)
+    item["is_new_construction"] = bool(item["is_new_construction"])
+    try:
+        item["sent_templates"] = json.loads(item["sent_templates"])
+    except Exception:
+        item["sent_templates"] = []
+    return item
+
+
+def record_post_close_drip_send(
+    drip_id: int,
+    contact_id: str,
+    template_id: int,
+    day_offset: int,
+    status: str = "SENT",
+    details: str = "",
+) -> None:
+    """
+    Logs an email send and appends the template_id to sent_templates.
+    """
+    init_store()
+    now = datetime.utcnow().isoformat() + "Z"
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    # 1. Log entry
+    cur.execute(
+        """
+        INSERT INTO post_close_drip_logs
+        (drip_id, contact_id, template_id, day_offset, sent_at, status, response_details)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (drip_id, contact_id, template_id, day_offset, now, status, details),
+    )
+
+    # 2. Update sent_templates in post_close_drips
+    cur.execute("SELECT sent_templates FROM post_close_drips WHERE id = ?", (drip_id,))
+    row = cur.fetchone()
+    sent_list = []
+    if row and row[0]:
+        try:
+            sent_list = json.loads(row[0])
+        except Exception:
+            sent_list = []
+    if template_id not in sent_list:
+        sent_list.append(template_id)
+        cur.execute(
+            "UPDATE post_close_drips SET sent_templates = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(sent_list), now, drip_id),
+        )
+
+    conn.commit()
+    conn.close()
+
+
+def cancel_post_close_drip(contact_id_or_email: str) -> bool:
+    """
+    Cancels or unsubscribes a contact from the drip automation.
+    """
+    init_store()
+    now = datetime.utcnow().isoformat() + "Z"
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE post_close_drips
+        SET status = 'CANCELLED', updated_at = ?
+        WHERE contact_id = ? OR email = ?
+        """,
+        (now, contact_id_or_email, contact_id_or_email.lower().strip()),
+    )
+    changed = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+    return changed
+
 

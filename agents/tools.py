@@ -3,12 +3,14 @@ import logging
 import os
 import re
 import time
+from datetime import datetime, date
 from typing import Any, Dict, List, Optional
 import httpx
 
 from n8n_catalog import N8N_BASE_URL, get_n8n_workflows
 import vector_memory
 from bigcapital_tools import bigcapital_client
+import state_store
 
 logger = logging.getLogger("agent_tools")
 
@@ -18,6 +20,27 @@ TWENTY_API_KEY = os.environ.get("TWENTY_API_KEY", "")
 
 # Fallback n8n gateway if needed
 N8N_CRM_GATEWAY_URL = f"{N8N_BASE_URL}/webhook/relaticle-crm-action"
+
+# Brevo API & Post-Close Automation Config
+BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
+BREVO_POST_CLOSE_LIST_ID = int(os.environ.get("BREVO_POST_CLOSE_LIST_ID", "14"))
+BREVO_BASE_URL = "https://api.brevo.com"
+
+# 1-Year Buyer Post-Close Drip Cadence (Day 280 / Template 13 is skipped per user instruction)
+BUYER_POST_CLOSE_SCHEDULE = [
+    {"day": 1, "template_id": 5, "name": "Day 1: Welcome & Immediate Priorities"},
+    {"day": 5, "template_id": 6, "name": "Day 5: Home Maintenance Guide"},
+    {"day": 8, "template_id": 7, "name": "Day 8: Top Home Security Tips"},
+    {"day": 14, "template_id": 8, "name": "Day 14: Estate Planning & Will Reminder"},
+    {"day": 21, "template_id": 9, "name": "Day 21: Energy Efficiency & Rebates"},
+    {"day": 45, "template_id": 10, "name": "Day 45: WA Construction & Permit Guide"},
+    {"day": 55, "template_id": 11, "name": "Day 55: Top 10 High-ROI Improvements"},
+    {"day": 90, "template_id": 12, "name": "Day 90: 3-Month Check-In"},
+    {"day": 300, "template_id": 14, "name": "Day 300: Annual Insurance Review"},
+    {"day": 330, "template_id": 15, "name": "Day 330: Annual Home Value Review (CMA)"},
+    {"day": 330, "template_id": 17, "name": "New Construction: 11-Month Builder Warranty", "new_construction_only": True},
+    {"day": 360, "template_id": 16, "name": "Day 360: Happy 1-Year Housiversary"},
+]
 
 
 def _get_crm_headers() -> Dict[str, str]:
@@ -471,6 +494,49 @@ TOOL_SCHEMAS = [
                         "type": "string",
                         "description": "Optional keyword or sender to filter emails by",
                     },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "enroll_buyer_post_close",
+            "description": "Maya Reyes (Marketing Agent) enrolls a buyer client into the 1-Year Post-Close Smart Plan after closing on a home. Syncs contact to Brevo list 'Buyer Post-Close Drip', initializes attributes (CLOSE_DATE, PROPERTY_ADDRESS, IS_NEW_CONSTRUCTION), creates SQLite schedule tracking, and logs the smart plan activation note on the Twenty CRM contact timeline.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "contact_id": {"type": "string", "description": "Twenty CRM Person ID (optional if email or name provided)"},
+                    "email": {"type": "string", "description": "Client email address"},
+                    "name": {"type": "string", "description": "Client full name or first name"},
+                    "close_date": {"type": "string", "description": "Closing date in YYYY-MM-DD format (defaults to today if omitted)"},
+                    "property_address": {"type": "string", "description": "Purchased home address"},
+                    "is_new_construction": {"type": "boolean", "description": "Whether the purchased property is new construction (eligible for 11-month builder warranty email)"},
+                    "deal_id": {"type": "string", "description": "Optional Twenty CRM Opportunity / Deal ID"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_post_close_drips",
+            "description": "Maya Reyes lists all active buyer clients enrolled in the Post-Close Smart Plan, showing days elapsed since closing, sent templates, and next scheduled touchpoints.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "process_post_close_drips",
+            "description": "Maya Reyes evaluates all active buyer post-close enrollments against today's date, delivers due email templates via Brevo SMTP API, and attaches delivery verification notes to Twenty CRM contact records.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "force_contact_id": {"type": "string", "description": "Optional: test or process a single specific contact"},
                 },
             },
         },
@@ -1045,6 +1111,18 @@ async def _direct_manage_opportunities(args: Dict[str, Any]) -> Dict[str, Any]:
                         logger.info(
                             f"Closing finalized: Contact '{poc_id}' marked as Past Client ({past_type}, maintenance_tips={is_maint_tips})."
                         )
+                        # Auto-Trigger Buyer Post-Close Smart Plan via Marketing Agent
+                        if past_type == "Buyer":
+                            c_date = opp_data.get("closeDate") or datetime.utcnow().strftime("%Y-%m-%d")
+                            is_new_c = bool("new construction" in (opp_data.get("name") or "").lower())
+                            enroll_res = await _direct_enroll_buyer_post_close({
+                                "contact_id": poc_id,
+                                "close_date": c_date,
+                                "property_address": addr,
+                                "deal_id": opp_id,
+                                "is_new_construction": is_new_c,
+                            })
+                            logger.info(f"Auto-enrolled buyer into Post-Close Smart Plan: {enroll_res}")
             except Exception as e:
                 logger.warning(f"Error handling post-deal stage synchronization: {e}")
 
@@ -1083,6 +1161,299 @@ async def _direct_manage_opportunities(args: Dict[str, Any]) -> Dict[str, Any]:
         "direct": True,
         "total": len(mapped_opps),
         "opportunities": mapped_opps,
+    }
+
+
+# =============================================================================
+# Brevo Marketing & Buyer Post-Close Automation Handlers
+# =============================================================================
+
+def _brevo_headers() -> Dict[str, str]:
+    return {
+        "api-key": BREVO_API_KEY,
+        "User-Agent": "Mozilla/5.0",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+
+async def _sync_contact_to_brevo_drip(
+    email: str,
+    first_name: str,
+    last_name: str,
+    property_address: str,
+    close_date: str,
+    is_new_construction: bool = False,
+) -> Dict[str, Any]:
+    url = f"{BREVO_BASE_URL}/v3/contacts"
+    payload = {
+        "email": email.strip().lower(),
+        "attributes": {
+            "FIRSTNAME": first_name or "",
+            "LASTNAME": last_name or "",
+            "ROLE": "Buyer",
+            "CLOSE_DATE": close_date or "",
+            "PROPERTY_ADDRESS": property_address or "",
+            "IS_NEW_CONSTRUCTION": bool(is_new_construction),
+        },
+        "listIds": [BREVO_POST_CLOSE_LIST_ID],
+        "updateEnabled": True,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, headers=_brevo_headers(), json=payload)
+            if resp.status_code in (200, 201, 204):
+                return {"ok": True, "status": resp.status_code}
+            logger.warning(f"Brevo contact sync returned {resp.status_code}: {resp.text}")
+            return {"ok": False, "status": resp.status_code, "error": resp.text}
+    except Exception as e:
+        logger.error(f"Error syncing contact to Brevo: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+async def _send_brevo_template(
+    email: str,
+    name: str,
+    template_id: int,
+    params: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    url = f"{BREVO_BASE_URL}/v3/smtp/email"
+    payload = {
+        "to": [{"email": email.strip().lower(), "name": name or "Valued Client"}],
+        "templateId": int(template_id),
+        "params": params or {},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, headers=_brevo_headers(), json=payload)
+            if resp.status_code in (200, 201, 202):
+                data = resp.json()
+                return {"ok": True, "message_id": data.get("messageId"), "status": resp.status_code}
+            return {"ok": False, "status": resp.status_code, "error": resp.text}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+async def _direct_enroll_buyer_post_close(args: Dict[str, Any]) -> Dict[str, Any]:
+    contact_id = args.get("contact_id")
+    email = args.get("email")
+    name = args.get("name") or ""
+    property_address = args.get("property_address") or ""
+    deal_id = args.get("deal_id")
+    is_new_construction = bool(args.get("is_new_construction", False))
+    close_date = args.get("close_date") or datetime.utcnow().strftime("%Y-%m-%d")
+
+    contact_data = None
+    if contact_id:
+        try:
+            res = await crm_get(f"/rest/people/{contact_id}")
+            contact_data = res.get("data", {}).get("person")
+        except Exception:
+            pass
+
+    if not contact_data and email:
+        search_res = await _direct_search_contacts({"query": email})
+        contacts = search_res.get("contacts", [])
+        if contacts:
+            contact_data = contacts[0]
+            contact_id = contact_data.get("id")
+
+    if not contact_data and name:
+        search_res = await _direct_search_contacts({"query": name})
+        contacts = search_res.get("contacts", [])
+        if contacts:
+            contact_data = contacts[0]
+            contact_id = contact_data.get("id")
+
+    first_name = ""
+    last_name = ""
+    if contact_data:
+        first_name = contact_data.get("firstName") or (contact_data.get("name", {}).get("firstName") if isinstance(contact_data.get("name"), dict) else "")
+        last_name = contact_data.get("lastName") or (contact_data.get("name", {}).get("lastName") if isinstance(contact_data.get("name"), dict) else "")
+        if not email:
+            email = contact_data.get("email") or (contact_data.get("emails", {}).get("primaryEmail") if isinstance(contact_data.get("emails"), dict) else "")
+        if not property_address:
+            property_address = contact_data.get("primaryPropertyAddress") or contact_data.get("address") or ""
+    elif name:
+        parts = name.strip().split(" ", 1)
+        first_name = parts[0]
+        last_name = parts[1] if len(parts) > 1 else ""
+
+    if not email:
+        return {"ok": False, "tool": "enroll_buyer_post_close", "error": "Client email is required to enroll in post-close smart plan."}
+
+    full_name = f"{first_name} {last_name}".strip() or name or "Valued Client"
+    cid = contact_id or email
+
+    brevo_sync = await _sync_contact_to_brevo_drip(
+        email=email,
+        first_name=first_name,
+        last_name=last_name,
+        property_address=property_address,
+        close_date=close_date,
+        is_new_construction=is_new_construction,
+    )
+
+    drip_record = state_store.enroll_post_close_drip(
+        contact_id=str(cid),
+        email=email,
+        first_name=first_name,
+        last_name=last_name,
+        property_address=property_address,
+        close_date=close_date,
+        is_new_construction=is_new_construction,
+        deal_id=deal_id,
+    )
+
+    if contact_id:
+        try:
+            note_content = (
+                f"### 🏡 Buyer Post-Close Smart Plan Activated\n"
+                f"- **Closing Date:** {close_date}\n"
+                f"- **Property:** {property_address or 'N/A'}\n"
+                f"- **New Construction:** {'Yes (11-Month Warranty active)' if is_new_construction else 'No'}\n"
+                f"- **Brevo List:** `Buyer Post-Close Drip` (ID: {BREVO_POST_CLOSE_LIST_ID})\n"
+                f"- **Sequence:** 12 automated homeowner touchpoints across Days 1–360 (Day 280 tax statement skipped per custom branding)."
+            )
+            note_res = await crm_post("/rest/notes", {"title": "Buyer Post-Close Smart Plan Activated", "body": note_content})
+            note_id = note_res.get("data", {}).get("createNote", {}).get("id")
+            if note_id:
+                await crm_post("/rest/noteTargets", {"noteId": note_id, "targetPersonId": contact_id})
+        except Exception as e:
+            logger.warning(f"Could not attach activation note in Twenty CRM: {e}")
+
+    return {
+        "ok": True,
+        "tool": "enroll_buyer_post_close",
+        "client_name": full_name,
+        "email": email,
+        "contact_id": contact_id,
+        "close_date": close_date,
+        "property_address": property_address,
+        "is_new_construction": is_new_construction,
+        "brevo_list_id": BREVO_POST_CLOSE_LIST_ID,
+        "brevo_sync_status": brevo_sync.get("ok"),
+        "message": f"Successfully enrolled {full_name} ({email}) into Buyer Post-Close Smart Plan starting from {close_date}.",
+    }
+
+
+async def _direct_list_post_close_drips(args: Dict[str, Any]) -> Dict[str, Any]:
+    drips = state_store.get_active_post_close_drips()
+    today = datetime.utcnow().date()
+    formatted_drips = []
+
+    for d in drips:
+        try:
+            c_date = datetime.strptime(d["close_date"], "%Y-%m-%d").date()
+            days_elapsed = (today - c_date).days
+        except Exception:
+            days_elapsed = 0
+
+        sent_ids = set(d.get("sent_templates", []))
+        
+        next_t = None
+        for item in BUYER_POST_CLOSE_SCHEDULE:
+            if item.get("new_construction_only") and not d.get("is_new_construction"):
+                continue
+            if item["template_id"] not in sent_ids:
+                next_t = f"Day {item['day']} - {item['name']}"
+                break
+
+        full_name = f"{d.get('first_name', '')} {d.get('last_name', '')}".strip() or "Valued Client"
+        formatted_drips.append({
+            "id": d["id"],
+            "contact_id": d["contact_id"],
+            "name": full_name,
+            "email": d["email"],
+            "property_address": d.get("property_address") or "N/A",
+            "close_date": d["close_date"],
+            "days_elapsed": days_elapsed,
+            "is_new_construction": d["is_new_construction"],
+            "sent_count": len(sent_ids),
+            "sent_templates": list(sent_ids),
+            "next_template": next_t or "All 12 templates delivered",
+        })
+
+    return {
+        "ok": True,
+        "tool": "list_post_close_drips",
+        "total": len(formatted_drips),
+        "drips": formatted_drips,
+    }
+
+
+async def _direct_process_post_close_drips(args: Dict[str, Any]) -> Dict[str, Any]:
+    force_cid = args.get("force_contact_id")
+    drips = state_store.get_active_post_close_drips()
+    if force_cid:
+        drips = [d for d in drips if d["contact_id"] == force_cid or d["email"].lower() == force_cid.lower()]
+
+    today = datetime.utcnow().date()
+    sent_count = 0
+    delivery_logs = []
+
+    for d in drips:
+        try:
+            c_date = datetime.strptime(d["close_date"], "%Y-%m-%d").date()
+            days_elapsed = (today - c_date).days
+        except Exception:
+            continue
+
+        sent_ids = set(d.get("sent_templates", []))
+        full_name = f"{d.get('first_name', '')} {d.get('last_name', '')}".strip() or "Valued Client"
+        first_name = d.get("first_name") or (full_name.split(" ")[0] if full_name else "there")
+
+        for item in BUYER_POST_CLOSE_SCHEDULE:
+            day = item["day"]
+            tid = item["template_id"]
+            if item.get("new_construction_only") and not d.get("is_new_construction"):
+                continue
+
+            if days_elapsed >= day and tid not in sent_ids:
+                send_res = await _send_brevo_template(
+                    email=d["email"],
+                    name=full_name,
+                    template_id=tid,
+                    params={"FIRSTNAME": first_name},
+                )
+                if send_res.get("ok"):
+                    sent_count += 1
+                    state_store.record_post_close_drip_send(
+                        drip_id=d["id"],
+                        contact_id=d["contact_id"],
+                        template_id=tid,
+                        day_offset=day,
+                        status="SENT",
+                        details=f"MessageID: {send_res.get('message_id')}",
+                    )
+                    sent_ids.add(tid)
+                    delivery_logs.append(f"Sent Template {tid} ({item['name']}) to {d['email']} (Day {days_elapsed} since close)")
+
+                    if d.get("contact_id") and not "@" in d.get("contact_id"):
+                        try:
+                            note_body = (
+                                f"📬 **Buyer Post-Close Drip Email Delivered**\n"
+                                f"- **Template:** `{item['name']}` (Brevo ID: `{tid}`)\n"
+                                f"- **Schedule:** Day {day} (Delivered on day {days_elapsed})\n"
+                                f"- **Message ID:** `{send_res.get('message_id')}`\n"
+                                f"- **Sent Via:** Brevo SMTP API (lokesh@lokeshchanana.com)"
+                            )
+                            n_res = await crm_post("/rest/notes", {"title": f"Post-Close Email Sent: {item['name']}", "body": note_body})
+                            nid = n_res.get("data", {}).get("createNote", {}).get("id")
+                            if nid:
+                                await crm_post("/rest/noteTargets", {"noteId": nid, "targetPersonId": d["contact_id"]})
+                        except Exception as e:
+                            logger.warning(f"Could not log email send note in Twenty CRM: {e}")
+                else:
+                    delivery_logs.append(f"Failed Template {tid} to {d['email']}: {send_res.get('error')}")
+
+    return {
+        "ok": True,
+        "tool": "process_post_close_drips",
+        "total_checked": len(drips),
+        "sent_count": sent_count,
+        "logs": delivery_logs,
+        "summary": f"Delivered {sent_count} post-close drip email(s) across {len(drips)} client(s)." if sent_count else "All client drip schedules are currently up to date.",
     }
 
 
@@ -1371,6 +1742,24 @@ async def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             res["raw_payload_sent"] = args
             return res
 
+        elif name == "enroll_buyer_post_close":
+            res = await _direct_enroll_buyer_post_close(args)
+            res["duration_ms"] = int((time.time() - start_ts) * 1000)
+            res["raw_payload_sent"] = args
+            return res
+
+        elif name == "list_post_close_drips":
+            res = await _direct_list_post_close_drips(args)
+            res["duration_ms"] = int((time.time() - start_ts) * 1000)
+            res["raw_payload_sent"] = args
+            return res
+
+        elif name == "process_post_close_drips":
+            res = await _direct_process_post_close_drips(args)
+            res["duration_ms"] = int((time.time() - start_ts) * 1000)
+            res["raw_payload_sent"] = args
+            return res
+
     except Exception as direct_err:
         logger.warning(f"Direct Twenty CRM call failed for '{name}': {direct_err}. Attempting n8n fallback...")
         # Fallback to n8n if direct Twenty call encountered network or unexpected error
@@ -1632,6 +2021,49 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
                 f"  - **Preview:** {em.get('snippet') or 'N/A'}\n"
             )
         lines.append("\n*Silas Drake has delivered these emails to Marcus Vance for specialist triage.*")
+        return "\n".join(lines)
+
+    if tool_name == "enroll_buyer_post_close":
+        return (
+            f"### 🏡 Buyer Post-Close Smart Plan Activated\n"
+            f"- **Client:** **{result.get('client_name')}** (`{result.get('email')}`)\n"
+            f"- **Property Address:** `{result.get('property_address') or 'N/A'}`\n"
+            f"- **Closing Date:** `{result.get('close_date')}`\n"
+            f"- **New Construction:** `{'Yes (11-Month Warranty active)' if result.get('is_new_construction') else 'No'}`\n"
+            f"- **Brevo List:** `Buyer Post-Close Drip` (ID: `{result.get('brevo_list_id')}`)\n"
+            f"- **Sequence:** 12 touchpoints scheduled across Days 1–360 (Day 280 tax statement skipped per custom branding)\n"
+            f"- **CRM Log:** Activation note attached to Twenty CRM contact timeline.\n\n"
+            f"{result.get('message', '')}"
+        )
+
+    if tool_name == "list_post_close_drips":
+        drips = result.get("drips", [])
+        if not drips:
+            return "### 🏡 Buyer Post-Close Smart Plan Enrollments\nNo active buyer drip enrollments found."
+        lines = [f"### 🏡 Active Buyer Post-Close Drips (`{len(drips)}` clients enrolled)\n"]
+        for d in drips:
+            nc_tag = " [New Construction]" if d.get("is_new_construction") else ""
+            lines.append(
+                f"- **{d.get('name')}** (`{d.get('email')}`){nc_tag}\n"
+                f"  - **Property:** `{d.get('property_address')}`\n"
+                f"  - **Closed:** `{d.get('close_date')}` (`{d.get('days_elapsed')}` days ago)\n"
+                f"  - **Progress:** {d.get('sent_count')} / 12 touchpoints sent\n"
+                f"  - **Next Delivery:** `{d.get('next_template')}`\n"
+            )
+        return "\n".join(lines)
+
+    if tool_name == "process_post_close_drips":
+        logs = result.get("logs", [])
+        lines = [
+            f"### 📬 Buyer Post-Close Delivery Run Completed\n"
+            f"- **Total Active Clients Checked:** `{result.get('total_checked', 0)}`\n"
+            f"- **Emails Sent Today:** `{result.get('sent_count', 0)}`\n"
+            f"- **Summary:** {result.get('summary', '')}\n"
+        ]
+        if logs:
+            lines.append("**Activity Logs:**")
+            for log_item in logs:
+                lines.append(f"- {log_item}")
         return "\n".join(lines)
 
     return f"```json\n{json.dumps(result, indent=2)}\n```"

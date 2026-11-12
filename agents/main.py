@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +21,7 @@ from state_store import (
     get_recent_request_flows,
     get_system_summary,
     init_store,
+    cancel_post_close_drip,
 )
 import vector_memory
 from webhooks import (
@@ -28,6 +30,11 @@ from webhooks import (
     handle_open_house_sign_in,
     handle_payment_intake,
     handle_website_contact,
+)
+from tools import (
+    _direct_enroll_buyer_post_close,
+    _direct_list_post_close_drips,
+    _direct_process_post_close_drips,
 )
 
 app = FastAPI(title="Multi-Agent Manager Hub (Manager + IT + Auditor)")
@@ -73,6 +80,21 @@ class MemoryQueryRequest(BaseModel):
 def on_startup() -> None:
     init_store()
     vector_memory.init_vector_memory_db()
+    asyncio.create_task(_post_close_scheduler_loop())
+
+
+async def _post_close_scheduler_loop() -> None:
+    """
+    Background worker that runs every hour to check active buyer post-close
+    drip enrollments and deliver scheduled Brevo templates.
+    """
+    await asyncio.sleep(15)
+    while True:
+        try:
+            await _direct_process_post_close_drips({})
+        except Exception as e:
+            pass
+        await asyncio.sleep(3600)
 
 
 @app.get("/api/manager/health")
@@ -229,7 +251,41 @@ async def webhook_brevo_sync(req: Request) -> JSONResponse:
 
 @app.post("/webhook/brevo-event-webhook")
 async def webhook_brevo_event(req: Request) -> JSONResponse:
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    event = body.get("event")
+    email = body.get("email")
+    if email and event in ("unsubscribed", "hard_bounce", "complaint"):
+        cancel_post_close_drip(email)
     return JSONResponse(content={"ok": True, "message": "Brevo event acknowledged by Agent Hub."})
+
+
+@app.post("/webhook/post-close-enroll")
+async def webhook_post_close_enroll(req: Request) -> JSONResponse:
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    res = await _direct_enroll_buyer_post_close(body)
+    return JSONResponse(content=res)
+
+
+@app.post("/webhook/post-close-process")
+async def webhook_post_close_process(req: Request) -> JSONResponse:
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    res = await _direct_process_post_close_drips(body)
+    return JSONResponse(content=res)
+
+
+@app.get("/api/marketing/post-close-drips")
+async def api_list_post_close_drips() -> JSONResponse:
+    res = await _direct_list_post_close_drips({})
+    return JSONResponse(content=res)
 
 
 @app.post("/webhook/bill-intake")
