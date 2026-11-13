@@ -11,6 +11,7 @@ Matches the exact Light Mode editorial architecture theme of https://lokeshchana
 - 88 interactive AcroForm checkboxes + 6 fillable text fields across Pages 17-21
 """
 
+import argparse
 import io
 import os
 import pymupdf
@@ -42,6 +43,7 @@ WHITE = (1.0, 1.0, 1.0)
 WHITE_255 = (255, 255, 255)
 
 ASSET_V2_DIR = "/tmp/guide_assets_v2"
+DEFAULT_SAT = 0.58
 PUBLIC_DIR = "/home/lokesh/Casa-poki/real-estate/public"
 FONT_DIR = "/tmp/guide_assets/fonts"
 
@@ -210,10 +212,12 @@ def insert_editorial_photo(
     dark_gradient=False,
     ivory_fade_bottom=False,
     grade=True,
-    sat=0.58,
+    sat=None,
     border_rgb=SILVER_BORDER_255,
     border_px=2,
 ):
+    if sat is None:
+        sat = DEFAULT_SAT
     r = pymupdf.Rect(rect)
     stream = make_editorial_jpeg(
         src_path,
@@ -927,10 +931,11 @@ def build_page_07_plumbing(doc):
         bg_rgb=IVORY_255,
         centering=(0.5, 0.6),
     )
+    plumbing_right_img = f"{ASSET_V2_DIR}/arch_plumbing_kitchen.jpg" if os.path.exists(f"{ASSET_V2_DIR}/arch_plumbing_kitchen.jpg") else f"{ASSET_V2_DIR}/arch_wood_detail.jpg"
     insert_editorial_photo(
         page,
         (36 + col_w + 12, y + 6, PAGE_W - 36, y + 158),
-        f"{ASSET_V2_DIR}/arch_wood_detail.jpg",
+        plumbing_right_img,
         radius=2,
         bg_rgb=IVORY_255,
     )
@@ -1041,10 +1046,11 @@ def build_page_09_appliances(doc):
         "Your home's appliances work hard every day, making life more convenient. With a bit of routine care, you can extend their lifespan and keep them operating efficiently.",
     )
 
+    app_img = f"{ASSET_V2_DIR}/arch_appliances.jpg" if os.path.exists(f"{ASSET_V2_DIR}/arch_appliances.jpg") else f"{ASSET_V2_DIR}/arch_wood_detail.jpg"
     insert_editorial_photo(
         page,
         (36, y + 8, PAGE_W - 36, y + 218),
-        f"{ASSET_V2_DIR}/arch_wood_detail.jpg",
+        app_img,
         radius=2,
         bg_rgb=IVORY_255,
         centering=(0.5, 0.55),
@@ -1684,14 +1690,14 @@ def build_page_22_back_cover(doc):
 
     page.draw_rect(pymupdf.Rect(0, 0, PAGE_W, 6), color=None, fill=CHARCOAL)
 
-    # Top Hero Image (Pacific Northwest Waterfront Architecture)
+    # Top Hero Image
+    back_hero_img = f"{ASSET_V2_DIR}/site_north.jpg" if os.path.exists(f"{ASSET_V2_DIR}/arch_appliances.jpg") else f"{ASSET_V2_DIR}/site_eastside.jpg"
     insert_editorial_photo(
         page,
         (36, 32, PAGE_W - 36, 318),
-        f"{ASSET_V2_DIR}/site_eastside.jpg",
+        back_hero_img,
         radius=2,
         bg_rgb=IVORY_255,
-        sat=0.55,
     )
 
     # Main Closing Editorial Card (White on Ivory with Charcoal left accent)
@@ -1950,7 +1956,7 @@ def main():
         "keywords": "Home Maintenance, Checklist, Lokesh Chanana, Real Broker, Seattle Real Estate",
     })
 
-    out_pdf = f"{PUBLIC_DIR}/home-maintenance-guide.pdf"
+    out_pdf = f"{PUBLIC_DIR}/home-maintenance-guide-classic.pdf" if EDITION == "classic" else f"{PUBLIC_DIR}/home-maintenance-guide.pdf"
     doc.subset_fonts()
     doc.save(out_pdf, garbage=3, deflate=True)
     sz_mb = os.path.getsize(out_pdf) / (1024 * 1024)
@@ -1958,4 +1964,11 @@ def main():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Generate Home Maintenance Guide PDF")
+    parser.add_argument("--edition", choices=["luxury", "classic"], default="luxury", help="Photo edition to build")
+    args = parser.parse_args()
+    EDITION = args.edition
+    if EDITION == "classic":
+        ASSET_V2_DIR = "/tmp/guide_assets_classic"
+        DEFAULT_SAT = 0.72
     main()
