@@ -3,51 +3,54 @@
 Generate the 22-page Branded & Interactive Home Maintenance Guide PDF
 for Lokesh Chanana (Loki) — Real Broker LLC.
 
-Preserves 100% of the vetted content from the reference Home Maintenance Guide,
-styled in Lokesh Chanana's Navy & Cyan brand identity with interactive AcroForm
-checkboxes on all 5 checklist pages (88 clickable checkboxes + date/notes fields).
+Matches the exact Light Mode editorial architecture theme of https://lokeshchanana.com:
+- Warm Ivory (#FAF8F5) & Ivory-Dark (#E5E1DB) canvas
+- Crisp White (#FFFFFF) cards with Silver (#E0E0E0 / #C0C0C0) borders and 4pt Charcoal (#1F2933) left accents
+- Playfair Display editorial serif headings + Plus Jakarta Sans body & wide-tracked uppercase kickers
+- Cohesive Pacific Northwest luxury architectural photography with unified warm-ivory & charcoal editorial color grading
+- 88 interactive AcroForm checkboxes + 6 fillable text fields across Pages 17-21
 """
 
 import io
 import os
 import pymupdf
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw, ImageOps, ImageEnhance
 import numpy as np
 
 PAGE_W = 612.0  # 8.5 in
 PAGE_H = 792.0  # 11.0 in
 
-# Brand Palette (RGB 0..1 for PyMuPDF, 0..255 for PIL)
-NAVY = (15 / 255, 23 / 255, 42 / 255)          # #0f172a
-NAVY_255 = (15, 23, 42)
-SLATE_900 = (30 / 255, 41 / 255, 59 / 255)     # #1e293b
-SLATE_900_255 = (30, 41, 59)
-SLATE_700 = (51 / 255, 65 / 255, 85 / 255)     # #334155
-SLATE_600 = (71 / 255, 85 / 255, 105 / 255)    # #475569
-SLATE_500 = (100 / 255, 116 / 255, 139 / 255)  # #64748b
-SLATE_400 = (148 / 255, 163 / 255, 184 / 255)  # #94a3b8
-SLATE_200 = (226 / 255, 232 / 255, 240 / 255)  # #e2e8f0
-SLATE_100 = (241 / 255, 245 / 255, 249 / 255)  # #f1f5f9
-SLATE_100_255 = (241, 245, 249)
-SLATE_50 = (248 / 255, 250 / 255, 252 / 255)   # #f8fafc
-SLATE_50_255 = (248, 250, 252)
+# Website Light Mode Palette (from tailwind.config.js)
+IVORY = (250 / 255, 248 / 255, 245 / 255)         # #FAF8F5 (bg-ivory)
+IVORY_255 = (250, 248, 245)
+IVORY_DARK = (229 / 255, 225 / 255, 219 / 255)    # #E5E1DB (bg-ivory-dark)
+IVORY_DARK_255 = (229, 225, 219)
+IVORY_CARD = (253 / 255, 252 / 255, 250 / 255)    # #FDFCFA
+
+CHARCOAL = (31 / 255, 41 / 255, 51 / 255)         # #1F2933 (text-charcoal / bg-charcoal)
+CHARCOAL_255 = (31, 41, 51)
+CHARCOAL_DARK = (21 / 255, 28 / 255, 35 / 255)    # #151C23 (charcoal-dark)
+CHARCOAL_DARK_255 = (21, 28, 35)
+CHARCOAL_LIGHT = (45 / 255, 58 / 255, 71 / 255)   # #2D3A47 (text-charcoal-light)
+
+SILVER = (192 / 255, 192 / 255, 192 / 255)        # #C0C0C0 (silver)
+SILVER_DARK = (140 / 255, 142 / 255, 145 / 255)   # #8C8E91 (silver-dark legible on light)
+SILVER_LIGHT = (224 / 255, 224 / 255, 224 / 255)  # #E0E0E0 (silver-light border)
+SILVER_BORDER_255 = (214, 211, 205)
+
 WHITE = (1.0, 1.0, 1.0)
 WHITE_255 = (255, 255, 255)
 
-CYAN = (6 / 255, 182 / 255, 212 / 255)         # #06b6d4
-CYAN_DARK = (8 / 255, 145 / 255, 178 / 255)    # #0891b2
-CYAN_LIGHT = (56 / 255, 189 / 255, 248 / 255)  # #38bdf8
-CYAN_TINT = (236 / 255, 254 / 255, 255 / 255)  # #ecfeff
-SKY_TINT = (240 / 255, 249 / 255, 255 / 255)   # #f0f9ff
-ROYAL = (37 / 255, 99 / 255, 235 / 255)        # #2563eb
-AMBER = (245 / 255, 158 / 255, 11 / 255)       # #f59e0b
-AMBER_TINT = (255 / 255, 251 / 255, 235 / 255) # #fffbeb
-
-ASSET_DIR = "/tmp/guide_assets"
+ASSET_V2_DIR = "/tmp/guide_assets_v2"
 PUBLIC_DIR = "/home/lokesh/Casa-poki/real-estate/public"
 FONT_DIR = "/tmp/guide_assets/fonts"
 
 FONTS = {
+    "PF-Reg": f"{FONT_DIR}/Playfair-normal-400.ttf",
+    "PF-Semi": f"{FONT_DIR}/Playfair-normal-600.ttf",
+    "PF-Bold": f"{FONT_DIR}/Playfair-normal-700.ttf",
+    "PF-Ital": f"{FONT_DIR}/Playfair-italic-400.ttf",
+    "PF-SemiItal": f"{FONT_DIR}/Playfair-italic-600.ttf",
     "PJS-Reg": f"{FONT_DIR}/PlusJakartaSans-Regular.ttf",
     "PJS-Med": f"{FONT_DIR}/PlusJakartaSans-Medium.ttf",
     "PJS-Semi": f"{FONT_DIR}/PlusJakartaSans-SemiBold.ttf",
@@ -62,7 +65,11 @@ def register_fonts(page):
         page.insert_font(fontname=name, fontfile=path)
 
 
-def add_text(page, rect, text, font="PJS-Reg", size=10.5, color=SLATE_700, align=0, lineheight=1.28):
+def paint_ivory_canvas(page):
+    page.draw_rect(pymupdf.Rect(0, 0, PAGE_W, PAGE_H), color=None, fill=IVORY)
+
+
+def add_text(page, rect, text, font="PJS-Reg", size=10.5, color=CHARCOAL_LIGHT, align=0, lineheight=1.28):
     r = pymupdf.Rect(rect)
     rc = page.insert_textbox(
         r,
@@ -91,7 +98,7 @@ def add_text(page, rect, text, font="PJS-Reg", size=10.5, color=SLATE_700, align
     return rc
 
 
-def draw_vector_check(page, cx, cy, size=5.0, color=CYAN_LIGHT, width=1.6):
+def draw_vector_check(page, cx, cy, size=5.0, color=CHARCOAL, width=1.6):
     p1 = pymupdf.Point(cx - size * 0.75, cy + size * 0.05)
     p2 = pymupdf.Point(cx - size * 0.15, cy + size * 0.65)
     p3 = pymupdf.Point(cx + size * 0.85, cy - size * 0.55)
@@ -99,17 +106,38 @@ def draw_vector_check(page, cx, cy, size=5.0, color=CYAN_LIGHT, width=1.6):
     page.draw_line(p2, p3, color=color, width=width)
 
 
-def make_rounded_jpeg(
+def editorial_grade(im, sat=0.58, contrast=1.05):
+    """
+    Harmonize photography to match lokeshchanana.com's Light Mode theme:
+    - Muted editorial saturation (58%) so architectural wood, stone, glass, and greenery feel cohesive
+    - Subtle warm-ivory (#FAF8F5) highlight & deep-charcoal (#1F2933) shadow split-tone
+    """
+    im = ImageEnhance.Color(im).enhance(sat)
+    im = ImageEnhance.Contrast(im).enhance(contrast)
+    arr = np.array(im, dtype=np.float32) / 255.0
+    lum = 0.299 * arr[:, :, 0] + 0.587 * arr[:, :, 1] + 0.114 * arr[:, :, 2]
+    ivory = np.array([250 / 255.0, 247 / 255.0, 242 / 255.0])
+    charcoal = np.array([31 / 255.0, 41 / 255.0, 51 / 255.0])
+    lum3 = lum[:, :, None]
+    tone = charcoal * (1.0 - lum3) + ivory * lum3
+    blended = np.clip(arr * 0.84 + tone * 0.16, 0.0, 1.0)
+    return Image.fromarray((blended * 255.0).astype(np.uint8), "RGB")
+
+
+def make_editorial_jpeg(
     src_path,
     w_pt,
     h_pt,
-    radius_pt=10,
-    bg_rgb=WHITE_255,
+    radius_pt=2,
+    bg_rgb=IVORY_255,
     scale=2.4,
     centering=(0.5, 0.5),
     dark_gradient=False,
-    border_rgb=None,
-    border_px=0,
+    ivory_fade_bottom=False,
+    grade=True,
+    sat=0.58,
+    border_rgb=SILVER_BORDER_255,
+    border_px=2,
 ):
     w_px = max(1, int(round(w_pt * scale)))
     h_px = max(1, int(round(h_pt * scale)))
@@ -118,49 +146,76 @@ def make_rounded_jpeg(
     im = Image.open(src_path).convert("RGB")
     fitted = ImageOps.fit(im, (w_px, h_px), method=Image.Resampling.LANCZOS, centering=centering)
 
+    if grade:
+        fitted = editorial_grade(fitted, sat=sat)
+
     if dark_gradient:
+        # Warm Charcoal (#1F2933) editorial overlay for white serif headlines on checklist banners
         overlay = Image.new("RGBA", (w_px, h_px), (0, 0, 0, 0))
         draw_ov = ImageDraw.Draw(overlay)
         for y in range(h_px):
             t = y / max(1, h_px - 1)
-            alpha = int(95 + 135 * (t ** 1.15))
-            draw_ov.line([(0, y), (w_px, y)], fill=(15, 23, 42, alpha))
+            alpha = int(115 + 115 * (t ** 1.1))
+            draw_ov.line([(0, y), (w_px, y)], fill=(31, 41, 51, alpha))
+        fitted = Image.alpha_composite(fitted.convert("RGBA"), overlay).convert("RGB")
+
+    if ivory_fade_bottom:
+        # Subtle fade into #FAF8F5 Ivory at the very bottom edge (like Hero.jsx)
+        overlay = Image.new("RGBA", (w_px, h_px), (0, 0, 0, 0))
+        draw_ov = ImageDraw.Draw(overlay)
+        for y in range(h_px):
+            t = max(0.0, (y / max(1, h_px - 1) - 0.65) / 0.35)
+            alpha = int(235 * (t ** 1.6))
+            draw_ov.line([(0, y), (w_px, y)], fill=(250, 248, 245, alpha))
         fitted = Image.alpha_composite(fitted.convert("RGBA"), overlay).convert("RGB")
 
     mask = Image.new("L", (w_px, h_px), 0)
     draw_m = ImageDraw.Draw(mask)
-    draw_m.rounded_rectangle((0, 0, w_px - 1, h_px - 1), radius=rad_px, fill=255)
+    if rad_px > 0:
+        draw_m.rounded_rectangle((0, 0, w_px - 1, h_px - 1), radius=rad_px, fill=255)
+    else:
+        draw_m.rectangle((0, 0, w_px - 1, h_px - 1), fill=255)
 
     bg = Image.new("RGB", (w_px, h_px), bg_rgb)
     bg.paste(fitted, (0, 0), mask)
 
     if border_rgb and border_px > 0:
         draw_b = ImageDraw.Draw(bg)
-        draw_b.rounded_rectangle(
-            (border_px // 2, border_px // 2, w_px - 1 - border_px // 2, h_px - 1 - border_px // 2),
-            radius=rad_px,
-            outline=border_rgb,
-            width=border_px,
-        )
+        if rad_px > 0:
+            draw_b.rounded_rectangle(
+                (border_px // 2, border_px // 2, w_px - 1 - border_px // 2, h_px - 1 - border_px // 2),
+                radius=rad_px,
+                outline=border_rgb,
+                width=border_px,
+            )
+        else:
+            draw_b.rectangle(
+                (border_px // 2, border_px // 2, w_px - 1 - border_px // 2, h_px - 1 - border_px // 2),
+                outline=border_rgb,
+                width=border_px,
+            )
 
     buf = io.BytesIO()
     bg.save(buf, format="JPEG", quality=86, optimize=True)
     return buf.getvalue()
 
 
-def insert_rounded_photo(
+def insert_editorial_photo(
     page,
     rect,
     src_path,
-    radius=10,
-    bg_rgb=WHITE_255,
+    radius=2,
+    bg_rgb=IVORY_255,
     centering=(0.5, 0.5),
     dark_gradient=False,
-    border_rgb=None,
-    border_px=0,
+    ivory_fade_bottom=False,
+    grade=True,
+    sat=0.58,
+    border_rgb=SILVER_BORDER_255,
+    border_px=2,
 ):
     r = pymupdf.Rect(rect)
-    stream = make_rounded_jpeg(
+    stream = make_editorial_jpeg(
         src_path,
         r.width,
         r.height,
@@ -168,123 +223,203 @@ def insert_rounded_photo(
         bg_rgb=bg_rgb,
         centering=centering,
         dark_gradient=dark_gradient,
+        ivory_fade_bottom=ivory_fade_bottom,
+        grade=grade,
+        sat=sat,
         border_rgb=border_rgb,
         border_px=border_px,
     )
     page.insert_image(r, stream=stream)
 
 
-def insert_logo_on_bg(page, rect, logo_path, bg_rgb=NAVY_255, invert_white_bg=False):
+def insert_logo(page, rect, logo_path, bg_rgb=IVORY_255, target_rgb=CHARCOAL_255, is_real_logo=False):
+    """
+    Render lc-logo.png or real-logo.png cleanly in target_rgb (Charcoal #1F2933 on Ivory/White,
+    or Ivory #FAF8F5 on Charcoal) with zero rectangular box artifacts.
+    """
     r = pymupdf.Rect(rect)
-    scale = 2.6
+    scale = 2.8
     w_px = max(1, int(round(r.width * scale)))
     h_px = max(1, int(round(r.height * scale)))
     logo = Image.open(logo_path).convert("RGBA")
+    arr = np.array(logo, dtype=np.float32)
 
-    if invert_white_bg:
-        # Convert black-on-white logo into crisp white-on-transparent
-        arr = np.array(logo, dtype=np.float32)
+    if is_real_logo:
+        # real-logo.png is black text on opaque white background
         lum = 0.299 * arr[:, :, 0] + 0.587 * arr[:, :, 1] + 0.114 * arr[:, :, 2]
         alpha = np.clip(255.0 - lum, 0, 255).astype(np.uint8)
-        white_logo = np.zeros_like(arr, dtype=np.uint8)
-        white_logo[:, :, 0] = 240
-        white_logo[:, :, 1] = 244
-        white_logo[:, :, 2] = 248
-        white_logo[:, :, 3] = alpha
-        logo = Image.fromarray(white_logo, mode="RGBA")
-        # Crop transparent margin so logo scales cleanly
-        bbox = logo.getbbox()
-        if bbox:
-            logo = logo.crop(bbox)
+    else:
+        # lc-logo.png has native alpha channel
+        alpha = arr[:, :, 3].astype(np.uint8)
 
-    logo.thumbnail((w_px, h_px), Image.Resampling.LANCZOS)
+    recolored = np.zeros_like(arr, dtype=np.uint8)
+    recolored[:, :, 0] = target_rgb[0]
+    recolored[:, :, 1] = target_rgb[1]
+    recolored[:, :, 2] = target_rgb[2]
+    recolored[:, :, 3] = alpha
+
+    clean_logo = Image.fromarray(recolored, mode="RGBA")
+    bbox = clean_logo.getbbox()
+    if bbox:
+        clean_logo = clean_logo.crop(bbox)
+
+    clean_logo.thumbnail((w_px, h_px), Image.Resampling.LANCZOS)
     canvas = Image.new("RGBA", (w_px, h_px), bg_rgb + (255,))
-    ox = (w_px - logo.width) // 2
-    oy = (h_px - logo.height) // 2
-    canvas.alpha_composite(logo, (ox, oy))
+    ox = (w_px - clean_logo.width) // 2
+    oy = (h_px - clean_logo.height) // 2
+    canvas.alpha_composite(clean_logo, (ox, oy))
+
     buf = io.BytesIO()
     canvas.convert("RGB").save(buf, format="JPEG", quality=92, optimize=True)
     page.insert_image(r, stream=buf.getvalue())
 
 
-def draw_running_chrome(page, page_num, category_label="HOMEOWNER RESOURCE GUIDE"):
-    page.draw_rect(pymupdf.Rect(0, 0, PAGE_W, 6), color=None, fill=NAVY)
-    page.draw_rect(pymupdf.Rect(0, 6, 180, 8.5), color=None, fill=CYAN)
-
+def draw_kicker_badge(page, x, y, text, align_center=False):
+    """
+    Matches Hero.jsx:
+    inline-block py-1 px-3 rounded border border-charcoal/20 text-[10px] uppercase tracking-[0.2em] font-semibold text-charcoal-light
+    """
+    w = max(120, len(text) * 5.6 + 22)
+    x0 = (PAGE_W - w) / 2.0 if align_center else x
+    box = pymupdf.Rect(x0, y, x0 + w, y + 18)
+    page.draw_rect(box, color=SILVER, fill=WHITE, width=0.7, radius=0.1)
     add_text(
         page,
-        (36, 16, 360, 32),
-        f"LOKESH CHANANA  •  {category_label.upper()}",
+        (x0 + 6, y + 3.2, x0 + w - 6, y + 17),
+        text.upper(),
         font="PJS-Bold",
-        size=7.5,
-        color=CYAN_DARK,
+        size=7.2,
+        color=CHARCOAL_LIGHT,
+        align=1 if align_center else 0,
+    )
+    return y + 24
+
+
+def draw_running_chrome(page, page_num, category_label="CLIENT RESOURCE GUIDE"):
+    paint_ivory_canvas(page)
+
+    # Top subtle Charcoal & Silver architectural rule (matching Header.jsx in light mode)
+    page.draw_rect(pymupdf.Rect(0, 0, PAGE_W, 4), color=None, fill=CHARCOAL)
+    add_text(
+        page,
+        (36, 15, 360, 30),
+        f"LOKESH CHANANA   •   {category_label.upper()}",
+        font="PJS-Bold",
+        size=7.2,
+        color=CHARCOAL_LIGHT,
     )
     add_text(
         page,
-        (360, 16, PAGE_W - 36, 32),
+        (360, 15, PAGE_W - 36, 30),
         "HOME MAINTENANCE GUIDE",
-        font="PJS-Semi",
-        size=7.5,
-        color=SLATE_400,
+        font="PF-Ital",
+        size=8.5,
+        color=SILVER_DARK,
         align=2,
     )
-    page.draw_line(pymupdf.Point(36, 33), pymupdf.Point(PAGE_W - 36, 33), color=SLATE_200, width=0.6)
+    page.draw_line(pymupdf.Point(36, 32), pymupdf.Point(PAGE_W - 36, 32), color=SILVER_LIGHT, width=0.8)
 
-    page.draw_line(pymupdf.Point(36, PAGE_H - 36), pymupdf.Point(PAGE_W - 36, PAGE_H - 36), color=SLATE_200, width=0.6)
+    # Bottom footer bar
+    page.draw_line(pymupdf.Point(36, PAGE_H - 36), pymupdf.Point(PAGE_W - 36, PAGE_H - 36), color=SILVER_LIGHT, width=0.8)
     add_text(
         page,
-        (36, PAGE_H - 29, 440, PAGE_H - 12),
-        "Lokesh Chanana (Loki)  •  REALTOR®  •  Real Broker LLC  |  (801) 860-1052  |  lokeshchanana.com",
+        (36, PAGE_H - 28, 460, PAGE_H - 12),
+        "Lokesh Chanana (Loki)  •  REALTOR®  •  Real Broker LLC   |   (801) 860-1052   |   lokeshchanana.com",
         font="PJS-Med",
-        size=8.0,
-        color=SLATE_500,
+        size=7.8,
+        color=CHARCOAL_LIGHT,
     )
     page.insert_link({
         "kind": pymupdf.LINK_URI,
-        "from": pymupdf.Rect(255, PAGE_H - 30, 325, PAGE_H - 12),
+        "from": pymupdf.Rect(255, PAGE_H - 30, 330, PAGE_H - 12),
         "uri": "tel:+18018601052",
     })
     page.insert_link({
         "kind": pymupdf.LINK_URI,
-        "from": pymupdf.Rect(330, PAGE_H - 30, 430, PAGE_H - 12),
+        "from": pymupdf.Rect(335, PAGE_H - 30, 445, PAGE_H - 12),
         "uri": "https://lokeshchanana.com",
     })
 
-    pill = pymupdf.Rect(PAGE_W - 64, PAGE_H - 31, PAGE_W - 36, PAGE_H - 15)
-    page.draw_rect(pill, color=None, fill=NAVY, radius=0.35)
+    # Architectural square page number badge in Charcoal (#1F2933) with Ivory text
+    pill = pymupdf.Rect(PAGE_W - 62, PAGE_H - 31, PAGE_W - 36, PAGE_H - 15)
+    page.draw_rect(pill, color=None, fill=CHARCOAL)
     add_text(
         page,
-        (PAGE_W - 64, PAGE_H - 29.5, PAGE_W - 36, PAGE_H - 14),
+        (PAGE_W - 62, PAGE_H - 29.5, PAGE_W - 36, PAGE_H - 14),
         f"{page_num:02d}",
-        font="PJS-Bold",
-        size=8.0,
-        color=CYAN_LIGHT,
+        font="PF-Bold",
+        size=8.5,
+        color=IVORY,
         align=1,
     )
 
 
 def draw_section_title(page, y, kicker, title, subtitle=None):
-    page.draw_rect(pymupdf.Rect(36, y, 40, y + 14), color=None, fill=CYAN)
-    add_text(page, (46, y - 1, 560, y + 16), kicker.upper(), font="PJS-Bold", size=8.5, color=CYAN_DARK)
-    add_text(page, (36, y + 16, PAGE_W - 36, y + 52), title, font="PJS-Extra", size=22.0, color=NAVY, lineheight=1.15)
-    cur_y = y + 48
+    cur_y = draw_kicker_badge(page, 36, y, kicker)
+    add_text(
+        page,
+        (36, cur_y - 2, PAGE_W - 36, cur_y + 34),
+        title,
+        font="PF-Bold",
+        size=22.5,
+        color=CHARCOAL,
+        lineheight=1.12,
+    )
+    cur_y += 32
     if subtitle:
-        add_text(page, (36, cur_y, PAGE_W - 36, cur_y + 42), subtitle, font="PJS-Reg", size=10.2, color=SLATE_600, lineheight=1.35)
+        add_text(
+            page,
+            (36, cur_y, PAGE_W - 36, cur_y + 42),
+            subtitle,
+            font="PJS-Reg",
+            size=10.0,
+            color=CHARCOAL_LIGHT,
+            lineheight=1.36,
+        )
         cur_y += 38
     return cur_y
 
 
-def draw_numbered_card(page, rect, num, title, body, bg=SLATE_50, accent=CYAN):
+def draw_numbered_card(page, rect, num, title, body, bg=WHITE):
+    """
+    Matches BuyersGuide.jsx & Resources.jsx Light Mode cards:
+    bg-white border border-silver/30 border-l-4 border-l-charcoal
+    """
     r = pymupdf.Rect(rect)
-    page.draw_rect(r, color=SLATE_200, fill=bg, width=0.7, radius=0.06)
-    page.draw_rect(pymupdf.Rect(r.x0, r.y0 + 8, r.x0 + 3.5, r.y1 - 8), color=None, fill=accent)
+    page.draw_rect(r, color=SILVER_LIGHT, fill=bg, width=0.8)
+    # 3.5pt solid Charcoal left accent bar (border-l-4 border-l-charcoal)
+    page.draw_rect(pymupdf.Rect(r.x0, r.y0, r.x0 + 3.5, r.y1), color=None, fill=CHARCOAL)
 
-    badge = pymupdf.Rect(r.x0 + 12, r.y0 + 11, r.x0 + 34, r.y0 + 33)
-    page.draw_rect(badge, color=None, fill=NAVY, radius=0.25)
-    add_text(page, (badge.x0, badge.y0 + 4.5, badge.x1, badge.y1), f"{num:02d}", font="PJS-Bold", size=8.5, color=CYAN_LIGHT, align=1)
+    # Editorial serif number badge
+    badge = pymupdf.Rect(r.x0 + 13, r.y0 + 11, r.x0 + 35, r.y0 + 33)
+    page.draw_rect(badge, color=SILVER_LIGHT, fill=IVORY, width=0.7)
+    add_text(
+        page,
+        (badge.x0, badge.y0 + 3.5, badge.x1, badge.y1),
+        f"{num:02d}",
+        font="PF-Bold",
+        size=9.2,
+        color=CHARCOAL,
+        align=1,
+    )
 
-    add_text(page, (r.x0 + 42, r.y0 + 10, r.x1 - 12, r.y0 + 30), title, font="PJS-Bold", size=11.2, color=NAVY)
-    add_text(page, (r.x0 + 42, r.y0 + 28, r.x1 - 12, r.y1 - 6), body, font="PJS-Reg", size=9.6, color=SLATE_700, lineheight=1.32)
+    add_text(
+        page,
+        (r.x0 + 44, r.y0 + 9, r.x1 - 12, r.y0 + 29),
+        title,
+        font="PF-Bold",
+        size=11.5,
+        color=CHARCOAL,
+    )
+    add_text(
+        page,
+        (r.x0 + 44, r.y0 + 27, r.x1 - 12, r.y1 - 6),
+        body,
+        font="PJS-Reg",
+        size=9.5,
+        color=CHARCOAL_LIGHT,
+        lineheight=1.33,
+    )
 
 
 # ==============================================================================
@@ -294,108 +429,121 @@ def draw_numbered_card(page, rect, num, title, body, bg=SLATE_50, accent=CYAN):
 def build_page_01_cover(doc):
     page = doc.new_page(width=PAGE_W, height=PAGE_H)
     register_fonts(page)
+    paint_ivory_canvas(page)
 
-    page.draw_rect(pymupdf.Rect(0, 0, PAGE_W, PAGE_H), color=None, fill=NAVY)
+    # Top Charcoal architectural bar
+    page.draw_rect(pymupdf.Rect(0, 0, PAGE_W, 6), color=None, fill=CHARCOAL)
 
-    page.draw_rect(pymupdf.Rect(0, 0, PAGE_W, 8), color=None, fill=CYAN)
-    page.draw_rect(pymupdf.Rect(36, 28, 195, 50), color=None, fill=SLATE_900, radius=0.2)
-    page.draw_rect(pymupdf.Rect(36, 28, 40, 50), color=None, fill=CYAN)
-    add_text(page, (48, 33.5, 192, 48), "CLIENT HANDBOOK", font="PJS-Bold", size=8.5, color=CYAN_LIGHT)
+    # Top Header Bar (matching Header.jsx in Light Mode)
+    insert_logo(page, (36, 18, 86, 62), f"{PUBLIC_DIR}/lc-logo.png", bg_rgb=IVORY_255, target_rgb=CHARCOAL_255)
+    add_text(page, (94, 24, 300, 44), "LOKESH CHANANA", font="PF-Bold", size=12.5, color=CHARCOAL)
+    add_text(page, (94, 42, 300, 58), "REAL ESTATE AGENT  •  GREATER SEATTLE", font="PJS-Semi", size=7.2, color=CHARCOAL_LIGHT)
 
-    # Top Right Logos (Real Broker inverted to white + LC logo)
-    insert_logo_on_bg(page, (PAGE_W - 180, 26, PAGE_W - 110, 54), f"{PUBLIC_DIR}/real-logo.png", bg_rgb=NAVY_255, invert_white_bg=True)
-    insert_logo_on_bg(page, (PAGE_W - 95, 18, PAGE_W - 36, 64), f"{PUBLIC_DIR}/lc-logo.png", bg_rgb=NAVY_255)
+    insert_logo(page, (PAGE_W - 110, 24, PAGE_W - 36, 54), f"{PUBLIC_DIR}/real-logo.png", bg_rgb=IVORY_255, target_rgb=CHARCOAL_255, is_real_logo=True)
+    page.draw_line(pymupdf.Point(36, 68), pymupdf.Point(PAGE_W - 36, 68), color=SILVER_LIGHT, width=0.8)
 
+    # Outlined Kicker Badge (matching Hero.jsx)
+    draw_kicker_badge(page, 36, 82, "GREATER SEATTLE SPECIALISTS  •  CLIENT RESOURCE", align_center=True)
+
+    # Editorial Playfair Display Title (matching Hero.jsx: Bold + Italic Light)
     add_text(
         page,
-        (36, 68, PAGE_W - 36, 118),
-        "HOME MAINTENANCE",
-        font="PJS-Extra",
-        size=36.0,
-        color=WHITE,
-        lineheight=1.05,
+        (36, 105, PAGE_W - 36, 158),
+        "Dedicated, Proactive",
+        font="PF-Bold",
+        size=30.0,
+        color=CHARCOAL,
+        align=1,
     )
     add_text(
         page,
-        (36, 112, 340, 162),
-        "GUIDE",
-        font="PJS-Extra",
-        size=36.0,
-        color=CYAN_LIGHT,
-        lineheight=1.05,
+        (36, 141, PAGE_W - 36, 194),
+        "Home Maintenance Guide.",
+        font="PF-Ital",
+        size=29.0,
+        color=CHARCOAL_LIGHT,
+        align=1,
     )
-    page.draw_rect(pymupdf.Rect(168, 132, PAGE_W - 36, 135), color=None, fill=CYAN)
 
     add_text(
         page,
-        (36, 162, PAGE_W - 36, 206),
-        "A practical, season-by-season handbook with interactive checklists to protect your investment, prevent costly surprises, and keep your home feeling brand new.",
+        (64, 190, PAGE_W - 64, 232),
+        "A practical, season-by-season architectural handbook with interactive checklists to protect your investment, prevent costly surprises, and preserve your home's long-term value.",
         font="PJS-Reg",
-        size=10.8,
-        color=SLATE_200,
+        size=10.2,
+        color=CHARCOAL_LIGHT,
+        align=1,
         lineheight=1.38,
     )
 
-    insert_rounded_photo(
+    # Main Pacific Northwest Luxury Architecture Hero Photo + 3 Architectural Vignettes
+    insert_editorial_photo(
         page,
-        (36, 214, PAGE_W - 36, 484),
-        f"{ASSET_DIR}/hero_foyer.jpg",
-        radius=12,
-        bg_rgb=NAVY_255,
-        border_rgb=(56, 189, 248),
-        border_px=3,
+        (36, 238, PAGE_W - 36, 488),
+        f"{ASSET_V2_DIR}/site_north.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
+        sat=0.55,
+        border_rgb=SILVER_BORDER_255,
+        border_px=2,
     )
 
-    strip_y0, strip_y1 = 496, 616
+    strip_y0, strip_y1 = 498, 610
     col_w = (PAGE_W - 72 - 20) / 3.0
     strip_imgs = [
-        f"{ASSET_DIR}/hero_kitchen.jpg",
-        f"{ASSET_DIR}/hero_living.jpg",
-        f"{ASSET_DIR}/hero_patio.jpg",
+        f"{ASSET_V2_DIR}/puget_spring.jpg",
+        f"{ASSET_V2_DIR}/puget_summer.jpg",
+        f"{ASSET_V2_DIR}/puget_fall.jpg",
     ]
     for i, img_p in enumerate(strip_imgs):
         x0 = 36 + i * (col_w + 10)
-        insert_rounded_photo(
+        insert_editorial_photo(
             page,
             (x0, strip_y0, x0 + col_w, strip_y1),
             img_p,
-            radius=9,
-            bg_rgb=NAVY_255,
-            border_rgb=(30, 41, 59),
+            radius=2,
+            bg_rgb=IVORY_255,
+            sat=0.55,
+            border_rgb=SILVER_BORDER_255,
             border_px=2,
         )
 
-    banner = pymupdf.Rect(36, 632, PAGE_W - 36, 674)
-    page.draw_rect(banner, color=CYAN, fill=SLATE_900, width=1.0, radius=0.15)
-    draw_vector_check(page, 64, 653, size=5.5, color=CYAN_LIGHT, width=2.0)
+    # Interactive Checklist Callout Bar (matching BuyersGuide.jsx callout box)
+    banner = pymupdf.Rect(36, 624, PAGE_W - 36, 664)
+    page.draw_rect(banner, color=SILVER_LIGHT, fill=WHITE, width=0.8)
+    page.draw_rect(pymupdf.Rect(36, 624, 40, 664), color=None, fill=CHARCOAL)
+    draw_vector_check(page, 58, 644, size=5.0, color=CHARCOAL, width=1.8)
     add_text(
         page,
-        (78, 645, PAGE_W - 48, 668),
-        "INCLUDES 5 INTERACTIVE FILLABLE CHECKLISTS (Pages 17–21) — Check off items right on your device or print!",
-        font="PJS-Semi",
-        size=9.3,
-        color=CYAN_LIGHT,
+        (72, 636, PAGE_W - 48, 658),
+        "INCLUDES 5 INTERACTIVE FILLABLE CHECKLISTS (Pages 17–21) — Check off items digitally or print!",
+        font="PJS-Bold",
+        size=9.0,
+        color=CHARCOAL,
     )
 
-    footer_card = pymupdf.Rect(36, 688, PAGE_W - 36, 760)
-    page.draw_rect(footer_card, color=None, fill=SLATE_900, radius=0.12)
-    page.draw_rect(pymupdf.Rect(36, 688, 42, 760), color=None, fill=CYAN)
+    # Bottom Agent Footer Card (Crisp White & Charcoal on Ivory)
+    footer_card = pymupdf.Rect(36, 676, PAGE_W - 36, 756)
+    page.draw_rect(footer_card, color=SILVER_LIGHT, fill=CHARCOAL, width=0.8)
 
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
-        (54, 697, 108, 751),
+        (50, 686, 106, 746),
         f"{PUBLIC_DIR}/loki-profile.jpg",
-        radius=8,
-        bg_rgb=SLATE_900_255,
+        radius=2,
+        bg_rgb=CHARCOAL_255,
         centering=(0.5, 0.2),
+        grade=False,
+        border_rgb=(192, 192, 192),
+        border_px=2,
     )
-    add_text(page, (120, 698, 420, 718), "LOKESH CHANANA (LOKI)", font="PJS-Extra", size=13.0, color=WHITE)
-    add_text(page, (120, 716, 420, 734), "Your Trusted REALTOR®  •  Real Broker LLC  (Lic #26006634)", font="PJS-Med", size=9.2, color=CYAN_LIGHT)
-    add_text(page, (120, 733, 550, 752), "(801) 860-1052   •   lokesh@lokeshchanana.com   •   lokeshchanana.com", font="PJS-Reg", size=9.0, color=SLATE_200)
+    add_text(page, (120, 688, 430, 710), "Lokesh Chanana (Loki)", font="PF-Bold", size=14.0, color=IVORY)
+    add_text(page, (120, 709, 430, 726), "YOUR TRUSTED REALTOR®  •  REAL BROKER LLC  (LIC #26006634)", font="PJS-Semi", size=8.0, color=SILVER)
+    add_text(page, (120, 727, 550, 746), "(801) 860-1052   •   lokesh@lokeshchanana.com   •   lokeshchanana.com", font="PJS-Med", size=8.8, color=IVORY)
 
-    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(120, 732, 200, 752), "uri": "tel:+18018601052"})
-    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(205, 732, 355, 752), "uri": "mailto:lokesh@lokeshchanana.com"})
-    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(360, 732, 490, 752), "uri": "https://lokeshchanana.com"})
+    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(120, 726, 200, 746), "uri": "tel:+18018601052"})
+    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(205, 726, 355, 746), "uri": "mailto:lokesh@lokeshchanana.com"})
+    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(360, 726, 490, 746), "uri": "https://lokeshchanana.com"})
 
 
 def build_page_02_welcome(doc):
@@ -403,57 +551,61 @@ def build_page_02_welcome(doc):
     register_fonts(page)
     draw_running_chrome(page, 2, "WELCOME HOME")
 
-    insert_rounded_photo(
+    # Left Column: Warm Architectural Interior + Agent Card
+    insert_editorial_photo(
         page,
-        (36, 52, 255, 420),
-        f"{ASSET_DIR}/p02_welcome.jpg",
-        radius=12,
-        bg_rgb=WHITE_255,
+        (36, 50, 255, 412),
+        f"{ASSET_V2_DIR}/arch_lighting_int.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
+        sat=0.55,
     )
 
-    agent_card = pymupdf.Rect(36, 434, 255, 736)
-    page.draw_rect(agent_card, color=None, fill=NAVY, radius=0.06)
-    page.draw_rect(pymupdf.Rect(36, 434, 255, 440), color=None, fill=CYAN)
+    # Agent Profile & Contact Card on Left Bottom (Crisp White & Charcoal Editorial Card)
+    agent_card = pymupdf.Rect(36, 426, 255, 736)
+    page.draw_rect(agent_card, color=SILVER_LIGHT, fill=WHITE, width=0.8)
+    page.draw_rect(pymupdf.Rect(36, 426, 255, 431), color=None, fill=CHARCOAL)
 
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
-        (54, 454, 134, 554),
+        (52, 444, 132, 544),
         f"{PUBLIC_DIR}/loki-profile.jpg",
-        radius=10,
-        bg_rgb=NAVY_255,
+        radius=2,
+        bg_rgb=WHITE_255,
         centering=(0.5, 0.2),
-        border_rgb=(6, 182, 212),
+        grade=False,
+        border_rgb=SILVER_BORDER_255,
         border_px=2,
     )
-    insert_logo_on_bg(page, (148, 454, 236, 506), f"{PUBLIC_DIR}/lc-logo.png", bg_rgb=NAVY_255)
-    insert_logo_on_bg(page, (152, 514, 232, 544), f"{PUBLIC_DIR}/real-logo.png", bg_rgb=NAVY_255, invert_white_bg=True)
+    insert_logo(page, (146, 446, 236, 498), f"{PUBLIC_DIR}/lc-logo.png", bg_rgb=WHITE_255, target_rgb=CHARCOAL_255)
+    insert_logo(page, (150, 506, 232, 536), f"{PUBLIC_DIR}/real-logo.png", bg_rgb=WHITE_255, target_rgb=CHARCOAL_255, is_real_logo=True)
 
-    add_text(page, (54, 566, 240, 584), "YOUR TRUSTED REALTOR®", font="PJS-Bold", size=8.0, color=CYAN_LIGHT)
-    add_text(page, (54, 581, 240, 604), "Lokesh Chanana", font="PJS-Extra", size=15.0, color=WHITE)
-    add_text(page, (54, 601, 240, 620), "Real Broker LLC  •  Greater Seattle & WA", font="PJS-Reg", size=8.5, color=SLATE_200)
+    add_text(page, (52, 556, 240, 572), "YOUR TRUSTED REALTOR®", font="PJS-Bold", size=7.5, color=SILVER_DARK)
+    add_text(page, (52, 570, 240, 594), "Lokesh Chanana", font="PF-Bold", size=15.5, color=CHARCOAL)
+    add_text(page, (52, 592, 240, 610), "Real Broker LLC  •  Greater Seattle & WA", font="PJS-Reg", size=8.3, color=CHARCOAL_LIGHT)
 
-    page.draw_line(pymupdf.Point(54, 626), pymupdf.Point(237, 626), color=SLATE_700, width=0.8)
+    page.draw_line(pymupdf.Point(52, 618), pymupdf.Point(239, 618), color=SILVER_LIGHT, width=0.8)
 
-    add_text(page, (54, 634, 240, 652), "LET'S CONNECT — CALL ME ANYTIME!", font="PJS-Bold", size=8.2, color=CYAN_LIGHT)
-    add_text(page, (54, 653, 240, 673), "CALL/TEXT:  (801) 860-1052", font="PJS-Semi", size=9.5, color=WHITE)
-    add_text(page, (54, 673, 240, 693), "EMAIL:  lokesh@lokeshchanana.com", font="PJS-Med", size=8.8, color=SLATE_200)
-    add_text(page, (54, 693, 240, 715), "WEB:  lokeshchanana.com", font="PJS-Semi", size=9.0, color=CYAN_LIGHT)
+    add_text(page, (52, 628, 240, 644), "LET'S CONNECT — CALL ME ANYTIME", font="PJS-Bold", size=7.8, color=CHARCOAL)
+    add_text(page, (52, 647, 240, 666), "CALL / TEXT:  (801) 860-1052", font="PJS-Semi", size=9.2, color=CHARCOAL)
+    add_text(page, (52, 667, 240, 686), "EMAIL:  lokesh@lokeshchanana.com", font="PJS-Med", size=8.6, color=CHARCOAL_LIGHT)
+    add_text(page, (52, 687, 240, 708), "WEB:  lokeshchanana.com", font="PJS-Bold", size=8.8, color=CHARCOAL)
 
-    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(54, 652, 235, 672), "uri": "tel:+18018601052"})
-    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(54, 672, 235, 692), "uri": "mailto:lokesh@lokeshchanana.com"})
-    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(54, 692, 235, 714), "uri": "https://lokeshchanana.com"})
+    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(52, 646, 235, 666), "uri": "tel:+18018601052"})
+    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(52, 666, 235, 686), "uri": "mailto:lokesh@lokeshchanana.com"})
+    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(52, 686, 235, 708), "uri": "https://lokeshchanana.com"})
 
-    page.draw_rect(pymupdf.Rect(278, 52, 378, 76), color=None, fill=CYAN_TINT, radius=0.2)
-    add_text(page, (278, 57, 378, 74), "HEY THERE!", font="PJS-Extra", size=10.0, color=CYAN_DARK, align=1)
+    # Right Column: Welcome Note
+    draw_kicker_badge(page, 278, 50, "HEY THERE!  •  WELCOME HOME")
 
     add_text(
         page,
-        (278, 86, PAGE_W - 36, 154),
+        (278, 80, PAGE_W - 36, 148),
         "Congratulations on becoming a homeowner!",
-        font="PJS-Extra",
+        font="PF-Bold",
         size=24.0,
-        color=NAVY,
-        lineheight=1.18,
+        color=CHARCOAL,
+        lineheight=1.16,
     )
 
     letter_body = (
@@ -465,32 +617,33 @@ def build_page_02_welcome(doc):
     )
     add_text(
         page,
-        (278, 164, PAGE_W - 36, 540),
+        (278, 158, PAGE_W - 36, 536),
         letter_body,
         font="PJS-Reg",
-        size=11.0,
-        color=SLATE_700,
+        size=10.8,
+        color=CHARCOAL_LIGHT,
         lineheight=1.48,
     )
 
-    sig_box = pymupdf.Rect(278, 555, PAGE_W - 36, 736)
-    page.draw_rect(sig_box, color=SLATE_200, fill=SLATE_50, width=0.8, radius=0.06)
-    page.draw_rect(pymupdf.Rect(278, 555, 283, 736), color=None, fill=CYAN)
+    # Signature Block (matching BuyersGuide.jsx left-bordered callout box)
+    sig_box = pymupdf.Rect(278, 552, PAGE_W - 36, 736)
+    page.draw_rect(sig_box, color=SILVER_LIGHT, fill=WHITE, width=0.8)
+    page.draw_rect(pymupdf.Rect(278, 552, 282, 736), color=None, fill=CHARCOAL)
 
-    add_text(page, (298, 572, 550, 594), "Warmest regards,", font="PJS-Ital", size=11.0, color=SLATE_600)
-    add_text(page, (298, 596, 550, 628), "Lokesh Chanana (Loki)", font="PJS-Extra", size=17.0, color=NAVY)
-    add_text(page, (298, 624, 550, 644), "REALTOR®  •  Real Broker LLC", font="PJS-Semi", size=10.0, color=CYAN_DARK)
+    add_text(page, (298, 568, 550, 590), "Warmest regards,", font="PF-Ital", size=12.0, color=CHARCOAL_LIGHT)
+    add_text(page, (298, 592, 550, 622), "Lokesh Chanana (Loki)", font="PF-Bold", size=17.0, color=CHARCOAL)
+    add_text(page, (298, 620, 550, 638), "REALTOR®  •  Real Broker LLC", font="PJS-Semi", size=9.2, color=SILVER_DARK)
 
     add_text(
         page,
-        (298, 654, 560, 724),
+        (298, 648, 560, 724),
         "What's Inside This Guide:\n"
         "•  Pages 03–07:  Investment, Big Repairs, Structure, Electrical & Plumbing\n"
         "•  Pages 08–15:  HVAC, Appliances, Interior, Curb Appeal, Security & Energy\n"
         "•  Pages 16–21:  5 Interactive Fillable Checklists (Pest, Spring, Summer, Fall, Winter)",
         font="PJS-Med",
-        size=9.2,
-        color=SLATE_700,
+        size=9.0,
+        color=CHARCOAL_LIGHT,
         lineheight=1.4,
     )
 
@@ -502,18 +655,18 @@ def build_page_03_invest(doc):
 
     y = draw_section_title(
         page,
-        48,
+        46,
         "PROTECT YOUR INVESTMENT",
         "Why Home Maintenance Matters",
         "Keeping up with your home isn't just a chore—it's a game-changer for your wallet, comfort, and peace of mind. Here's why staying on top of home maintenance is so important:",
     )
 
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (36, y + 6, PAGE_W - 36, y + 186),
-        f"{ASSET_DIR}/p03_invest.jpg",
-        radius=10,
-        bg_rgb=WHITE_255,
+        f"{ASSET_V2_DIR}/arch_living_glass.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
         centering=(0.5, 0.55),
     )
 
@@ -544,8 +697,7 @@ def build_page_03_invest(doc):
     card_h = 74
     gap = 9
     for idx, (title, body) in enumerate(items, 1):
-        bg = SLATE_50 if idx % 2 == 1 else SKY_TINT
-        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=bg)
+        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=WHITE)
         cy += card_h + gap
 
 
@@ -556,19 +708,19 @@ def build_page_04_repairs(doc):
 
     y = draw_section_title(
         page,
-        48,
+        46,
         "SMART PLANNING & OPTIONS",
         "When Big Repairs Come Knocking",
         "Sometimes, major repairs or upgrades are unavoidable. Here's how to handle them without losing sleep:",
     )
 
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (36, y + 6, PAGE_W - 36, y + 190),
-        f"{ASSET_DIR}/p04_repairs.jpg",
-        radius=10,
-        bg_rgb=WHITE_255,
-        centering=(0.5, 0.6),
+        f"{ASSET_V2_DIR}/site_eastside.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
+        centering=(0.5, 0.65),
     )
 
     items = [
@@ -605,8 +757,7 @@ def build_page_04_repairs(doc):
         r_idx, c_idx = divmod(idx - 1, 2)
         x0 = 36 + c_idx * (col_w + 14)
         y0 = grid_y + r_idx * (row_h + 12)
-        bg = SLATE_50 if (r_idx + c_idx) % 2 == 0 else SKY_TINT
-        draw_numbered_card(page, (x0, y0, x0 + col_w, y0 + row_h), idx, title, body, bg=bg)
+        draw_numbered_card(page, (x0, y0, x0 + col_w, y0 + row_h), idx, title, body, bg=WHITE)
 
 
 def build_page_05_structure(doc):
@@ -616,26 +767,26 @@ def build_page_05_structure(doc):
 
     y = draw_section_title(
         page,
-        48,
+        46,
         "THE BACKBONE OF YOUR HOME",
         "Keep Your Home Standing Strong",
         "Your home's structure is its backbone, and keeping it in good shape is crucial for safety and longevity. Regular attention to key areas can prevent small issues from becoming big problems down the line.",
     )
 
     col_w = (PAGE_W - 72 - 12) / 2.0
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (36, y + 6, 36 + col_w, y + 166),
-        f"{ASSET_DIR}/p05_exterior.jpg",
-        radius=10,
-        bg_rgb=WHITE_255,
+        f"{ASSET_V2_DIR}/puget_spring.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
     )
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (36 + col_w + 12, y + 6, PAGE_W - 36, y + 166),
-        f"{ASSET_DIR}/p05_porch.jpg",
-        radius=10,
-        bg_rgb=WHITE_255,
+        f"{ASSET_V2_DIR}/puget_fall.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
     )
 
     items = [
@@ -665,8 +816,7 @@ def build_page_05_structure(doc):
     card_h = 77
     gap = 8
     for idx, (title, body) in enumerate(items, 1):
-        bg = SLATE_50 if idx % 2 == 1 else SKY_TINT
-        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=bg)
+        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=WHITE)
         cy += card_h + gap
 
 
@@ -677,26 +827,25 @@ def build_page_06_electrical(doc):
 
     y = draw_section_title(
         page,
-        48,
+        46,
         "ELECTRICAL SYSTEM CARE",
         "Power Up Safely",
         "Your home's electrical system keeps everything running—from your morning coffee to your evening TV time. Keeping it in good shape is crucial for safety and convenience. Here's how to stay on top of it and know when to bring in a pro.",
     )
 
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (36, y + 8, 285, y + 172),
-        f"{ASSET_DIR}/p06_electrical.jpg",
-        radius=10,
-        bg_rgb=WHITE_255,
+        f"{ASSET_V2_DIR}/arch_interior_warm.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
     )
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (297, y + 8, PAGE_W - 36, y + 172),
-        f"{ASSET_DIR}/p06_dining.jpg",
-        radius=10,
-        bg_rgb=WHITE_255,
-        centering=(0.5, 0.4),
+        f"{ASSET_V2_DIR}/arch_wood_detail.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
     )
 
     routine_items = [
@@ -716,28 +865,28 @@ def build_page_06_electrical(doc):
 
     cy = y + 184
     for idx, (title, body) in enumerate(routine_items, 1):
-        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + 72), idx, title, body, bg=SLATE_50)
+        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + 72), idx, title, body, bg=WHITE)
         cy += 79
 
+    # Editorial Callout Card: When to Call a Professional?
     pro_box = pymupdf.Rect(36, cy + 4, PAGE_W - 36, 742)
-    page.draw_rect(pro_box, color=None, fill=NAVY, radius=0.05)
-    page.draw_rect(pymupdf.Rect(36, cy + 4, PAGE_W - 36, cy + 9), color=None, fill=AMBER)
+    page.draw_rect(pro_box, color=SILVER_LIGHT, fill=CHARCOAL, width=0.8)
 
     add_text(
         page,
-        (52, cy + 16, PAGE_W - 52, cy + 36),
-        "WHEN TO CALL A PROFESSIONAL?",
-        font="PJS-Extra",
-        size=13.0,
-        color=CYAN_LIGHT,
+        (52, cy + 14, PAGE_W - 52, cy + 36),
+        "When to Call a Licensed Professional?",
+        font="PF-Bold",
+        size=14.0,
+        color=IVORY,
     )
     add_text(
         page,
         (52, cy + 34, PAGE_W - 52, cy + 54),
         "Some electrical issues are too risky to handle on your own. Here's when you should reach out to a licensed electrician:",
         font="PJS-Reg",
-        size=9.2,
-        color=SLATE_200,
+        size=9.0,
+        color=SILVER,
     )
 
     pro_items = [
@@ -751,9 +900,9 @@ def build_page_06_electrical(doc):
         r_i, c_i = divmod(i, 2)
         px = 52 + c_i * (col_w + 16)
         py = cy + 56 + r_i * 54
-        page.draw_rect(pymupdf.Rect(px, py, px + col_w, py + 48), color=SLATE_700, fill=SLATE_900, width=0.6, radius=0.08)
-        add_text(page, (px + 10, py + 5, px + col_w - 8, py + 21), f"•  {pt}", font="PJS-Bold", size=9.2, color=AMBER)
-        add_text(page, (px + 10, py + 20, px + col_w - 8, py + 46), pb, font="PJS-Reg", size=8.2, color=SLATE_200, lineheight=1.25)
+        page.draw_rect(pymupdf.Rect(px, py, px + col_w, py + 48), color=CHARCOAL_LIGHT, fill=CHARCOAL_DARK, width=0.7)
+        add_text(page, (px + 10, py + 5, px + col_w - 8, py + 21), f"•  {pt}", font="PJS-Bold", size=9.0, color=IVORY)
+        add_text(page, (px + 10, py + 20, px + col_w - 8, py + 46), pb, font="PJS-Reg", size=8.1, color=SILVER, lineheight=1.25)
 
 
 def build_page_07_plumbing(doc):
@@ -763,26 +912,27 @@ def build_page_07_plumbing(doc):
 
     y = draw_section_title(
         page,
-        48,
+        46,
         "PLUMBING MAINTENANCE",
         "Keep the Water Flowing",
         "Your home's plumbing is like its circulatory system, delivering fresh water and whisking away waste. Keeping it in good shape ensures comfort and helps you avoid messy (and costly) surprises.",
     )
 
     col_w = (PAGE_W - 72 - 12) / 2.0
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (36, y + 6, 36 + col_w, y + 158),
-        f"{ASSET_DIR}/p07_plumbing_bath.jpg",
-        radius=10,
-        bg_rgb=WHITE_255,
+        f"{ASSET_V2_DIR}/arch_bath_spa.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
+        centering=(0.5, 0.6),
     )
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (36 + col_w + 12, y + 6, PAGE_W - 36, y + 158),
-        f"{ASSET_DIR}/p07_plumbing_garden.jpg",
-        radius=10,
-        bg_rgb=WHITE_255,
+        f"{ASSET_V2_DIR}/arch_wood_detail.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
     )
 
     plumbing_items = [
@@ -803,20 +953,19 @@ def build_page_07_plumbing(doc):
     cy = y + 170
     heights = [74, 92, 66]
     for idx, ((title, body), h) in enumerate(zip(plumbing_items, heights), 1):
-        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + h), idx, title, body, bg=SLATE_50 if idx % 2 == 1 else SKY_TINT)
+        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + h), idx, title, body, bg=WHITE)
         cy += h + 8
 
     tips_box = pymupdf.Rect(36, cy + 4, PAGE_W - 36, 742)
-    page.draw_rect(tips_box, color=None, fill=NAVY, radius=0.05)
-    page.draw_rect(pymupdf.Rect(36, cy + 4, PAGE_W - 36, cy + 9), color=None, fill=CYAN)
+    page.draw_rect(tips_box, color=SILVER_LIGHT, fill=CHARCOAL, width=0.8)
 
     add_text(
         page,
-        (52, cy + 16, PAGE_W - 52, cy + 36),
-        "QUICK TIPS FOR A HEALTHY PLUMBING SYSTEM",
-        font="PJS-Extra",
-        size=12.5,
-        color=CYAN_LIGHT,
+        (52, cy + 14, PAGE_W - 52, cy + 36),
+        "Quick Tips for a Healthy Plumbing System",
+        font="PF-Bold",
+        size=13.5,
+        color=IVORY,
     )
 
     quick_tips = [
@@ -830,9 +979,9 @@ def build_page_07_plumbing(doc):
         r_i, c_i = divmod(i, 2)
         px = 52 + c_i * (col_w2 + 16)
         py = cy + 42 + r_i * 50
-        page.draw_rect(pymupdf.Rect(px, py, px + col_w2, py + 44), color=SLATE_700, fill=SLATE_900, width=0.6, radius=0.08)
-        add_text(page, (px + 10, py + 5, px + col_w2 - 8, py + 20), f"•  {qt}", font="PJS-Bold", size=8.8, color=CYAN_LIGHT)
-        add_text(page, (px + 10, py + 19, px + col_w2 - 8, py + 42), qb, font="PJS-Reg", size=8.3, color=SLATE_200, lineheight=1.25)
+        page.draw_rect(pymupdf.Rect(px, py, px + col_w2, py + 44), color=CHARCOAL_LIGHT, fill=CHARCOAL_DARK, width=0.7)
+        add_text(page, (px + 10, py + 5, px + col_w2 - 8, py + 20), f"•  {qt}", font="PJS-Bold", size=8.6, color=IVORY)
+        add_text(page, (px + 10, py + 19, px + col_w2 - 8, py + 42), qb, font="PJS-Reg", size=8.2, color=SILVER, lineheight=1.25)
 
 
 def build_page_08_hvac(doc):
@@ -842,18 +991,18 @@ def build_page_08_hvac(doc):
 
     y = draw_section_title(
         page,
-        48,
+        46,
         "YEAR-ROUND CLIMATE COMFORT",
         "HVAC Maintenance Made Simple",
         "Your Heating, Ventilation, and Air Conditioning (HVAC) system is the heart of your home's comfort. It keeps you cool during sweltering summers and warm on chilly winter nights. Giving it a little attention ensures it runs efficiently and lasts longer.",
     )
 
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (36, y + 8, PAGE_W - 36, y + 235),
-        f"{ASSET_DIR}/p08_hvac.jpg",
-        radius=12,
-        bg_rgb=WHITE_255,
+        f"{ASSET_V2_DIR}/arch_spring_home.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
         centering=(0.5, 0.55),
     )
 
@@ -875,8 +1024,7 @@ def build_page_08_hvac(doc):
     cy = y + 252
     card_h = 104
     for idx, (title, body) in enumerate(items, 1):
-        bg = SLATE_50 if idx % 2 == 1 else SKY_TINT
-        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=bg)
+        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=WHITE)
         cy += card_h + 12
 
 
@@ -887,18 +1035,18 @@ def build_page_09_appliances(doc):
 
     y = draw_section_title(
         page,
-        48,
+        46,
         "EXTEND APPLIANCE LIFESPAN",
         "Appliance Care",
         "Your home's appliances work hard every day, making life more convenient. With a bit of routine care, you can extend their lifespan and keep them operating efficiently.",
     )
 
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (36, y + 8, PAGE_W - 36, y + 218),
-        f"{ASSET_DIR}/p09_appliance.jpg",
-        radius=12,
-        bg_rgb=WHITE_255,
+        f"{ASSET_V2_DIR}/arch_wood_detail.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
         centering=(0.5, 0.55),
     )
 
@@ -924,8 +1072,7 @@ def build_page_09_appliances(doc):
     cy = y + 234
     card_h = 86
     for idx, (title, body) in enumerate(items, 1):
-        bg = SLATE_50 if idx % 2 == 1 else SKY_TINT
-        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=bg)
+        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=WHITE)
         cy += card_h + 10
 
 
@@ -936,18 +1083,18 @@ def build_page_10_interior(doc):
 
     y = draw_section_title(
         page,
-        48,
+        46,
         "HEALTHY & BEAUTIFUL LIVING SPACES",
         "Essential Interior Home Maintenance Tips",
         "The inside of your home is where life happens. Regular upkeep keeps it looking great and ensures a healthy living environment.",
     )
 
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (36, y + 8, PAGE_W - 36, y + 218),
-        f"{ASSET_DIR}/p10_interior.jpg",
-        radius=12,
-        bg_rgb=WHITE_255,
+        f"{ASSET_V2_DIR}/arch_pest_perimeter.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
     )
 
     items = [
@@ -972,8 +1119,7 @@ def build_page_10_interior(doc):
     cy = y + 234
     card_h = 86
     for idx, (title, body) in enumerate(items, 1):
-        bg = SLATE_50 if idx % 2 == 1 else SKY_TINT
-        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=bg)
+        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=WHITE)
         cy += card_h + 10
 
 
@@ -984,18 +1130,18 @@ def build_page_11_curb_appeal(doc):
 
     y = draw_section_title(
         page,
-        48,
+        46,
         "EXTERIOR PROTECTION",
         "Curb Appeal Made Easy",
         "The exterior of your home makes the first impression and protects everything inside. A little maintenance goes a long way in keeping it attractive and durable.",
     )
 
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (36, y + 8, PAGE_W - 36, y + 218),
-        f"{ASSET_DIR}/p11_curb.jpg",
-        radius=12,
-        bg_rgb=WHITE_255,
+        f"{ASSET_V2_DIR}/arch_curb_walkway.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
     )
 
     items = [
@@ -1020,8 +1166,7 @@ def build_page_11_curb_appeal(doc):
     cy = y + 234
     card_h = 86
     for idx, (title, body) in enumerate(items, 1):
-        bg = SLATE_50 if idx % 2 == 1 else SKY_TINT
-        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=bg)
+        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=WHITE)
         cy += card_h + 10
 
 
@@ -1032,19 +1177,19 @@ def build_page_12_security(doc):
 
     y = draw_section_title(
         page,
-        48,
+        46,
         "PROTECTING YOUR SANCTUARY",
         "Safety and Security",
         "Your home is your sanctuary, and keeping it safe doesn't have to be complicated. Here are some straightforward ways to boost your home's safety and security.",
     )
 
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (36, y + 8, PAGE_W - 36, y + 218),
-        f"{ASSET_DIR}/p12_security.jpg",
-        radius=12,
-        bg_rgb=WHITE_255,
-        centering=(0.5, 0.65),
+        f"{ASSET_V2_DIR}/arch_kitchen_lux.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
+        centering=(0.5, 0.55),
     )
 
     items = [
@@ -1069,8 +1214,7 @@ def build_page_12_security(doc):
     cy = y + 234
     card_h = 86
     for idx, (title, body) in enumerate(items, 1):
-        bg = SLATE_50 if idx % 2 == 1 else SKY_TINT
-        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=bg)
+        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=WHITE)
         cy += card_h + 10
 
 
@@ -1081,18 +1225,19 @@ def build_page_13_energy(doc):
 
     y = draw_section_title(
         page,
-        48,
+        46,
         "LOWER BILLS & GREATER COMFORT",
         "Save Money and Stay Cozy",
         "Who doesn't love saving money and being comfortable at home? Here are some effortless ways to make your home more energy-efficient.",
     )
 
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (36, y + 8, PAGE_W - 36, y + 218),
-        f"{ASSET_DIR}/p13_energy.jpg",
-        radius=12,
-        bg_rgb=WHITE_255,
+        f"{ASSET_V2_DIR}/site_seattle.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
+        centering=(0.5, 0.5),
     )
 
     items = [
@@ -1117,8 +1262,7 @@ def build_page_13_energy(doc):
     cy = y + 234
     card_h = 86
     for idx, (title, body) in enumerate(items, 1):
-        bg = SLATE_50 if idx % 2 == 1 else SKY_TINT
-        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=bg)
+        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=WHITE)
         cy += card_h + 10
 
 
@@ -1129,19 +1273,19 @@ def build_page_14_preventative(doc):
 
     y = draw_section_title(
         page,
-        48,
+        46,
         "STAY AHEAD OF REPAIRS",
         "Simple Preventative Measures",
         "A little prevention goes a long way in home maintenance. Here's how to nip potential problems in the bud.",
     )
 
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (36, y + 8, PAGE_W - 36, y + 218),
-        f"{ASSET_DIR}/p14_prevent.jpg",
-        radius=12,
-        bg_rgb=WHITE_255,
-        centering=(0.5, 0.65),
+        f"{ASSET_V2_DIR}/site_south.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
+        centering=(0.5, 0.55),
     )
 
     items = [
@@ -1166,8 +1310,7 @@ def build_page_14_preventative(doc):
     cy = y + 234
     card_h = 86
     for idx, (title, body) in enumerate(items, 1):
-        bg = SLATE_50 if idx % 2 == 1 else SKY_TINT
-        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=bg)
+        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=WHITE)
         cy += card_h + 10
 
 
@@ -1178,18 +1321,18 @@ def build_page_15_diy_or_pros(doc):
 
     y = draw_section_title(
         page,
-        48,
+        46,
         "KNOW WHEN TO CALL AN EXPERT",
         "DIY or Call in the Pros?",
         "Tackling home projects can be satisfying, but sometimes it's best to leave it to the experts. Here's how to figure out the best approach.",
     )
 
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (36, y + 8, PAGE_W - 36, y + 218),
-        f"{ASSET_DIR}/p15_diy.jpg",
-        radius=12,
-        bg_rgb=WHITE_255,
+        f"{ASSET_V2_DIR}/arch_craft_plan.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
     )
 
     items = [
@@ -1214,189 +1357,201 @@ def build_page_15_diy_or_pros(doc):
     cy = y + 234
     card_h = 86
     for idx, (title, body) in enumerate(items, 1):
-        bg = SLATE_50 if idx % 2 == 1 else SKY_TINT
-        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=bg)
+        draw_numbered_card(page, (36, cy, PAGE_W - 36, cy + card_h), idx, title, body, bg=WHITE)
         cy += card_h + 10
 
 
 def build_page_16_divider(doc):
     page = doc.new_page(width=PAGE_W, height=PAGE_H)
     register_fonts(page)
+    draw_running_chrome(page, 16, "SEASONAL & PREVENTATIVE CHECKLISTS")
 
-    page.draw_rect(pymupdf.Rect(0, 0, PAGE_W, PAGE_H), color=None, fill=NAVY)
-    page.draw_rect(pymupdf.Rect(0, 0, PAGE_W, 8), color=None, fill=CYAN)
-
-    page.draw_rect(pymupdf.Rect(206, 66, 406, 90), color=CYAN, fill=SLATE_900, width=1.0, radius=0.25)
-    add_text(page, (206, 71.5, 406, 88), "INTERACTIVE CHECKLIST SECTION", font="PJS-Bold", size=8.5, color=CYAN_LIGHT, align=1)
+    draw_kicker_badge(page, 36, 58, "INTERACTIVE CHECKLIST SECTION", align_center=True)
 
     add_text(
         page,
-        (36, 108, PAGE_W - 36, 175),
+        (36, 86, PAGE_W - 36, 138),
         "Let's Clean & Maintain!",
-        font="PJS-Extra",
-        size=38.0,
-        color=WHITE,
+        font="PF-Bold",
+        size=34.0,
+        color=CHARCOAL,
         align=1,
     )
     add_text(
         page,
-        (66, 170, PAGE_W - 66, 224),
+        (64, 140, PAGE_W - 64, 192),
         "Use the following 5 interactive checklists to stay ahead of seasonal upkeep and pest prevention. Click or tap any checkbox directly inside this PDF to track your progress—or print these pages for your fridge!",
         font="PJS-Reg",
-        size=11.0,
-        color=SLATE_200,
+        size=10.5,
+        color=CHARCOAL_LIGHT,
         align=1,
         lineheight=1.4,
     )
 
-    insert_rounded_photo(
-        page,
-        (36, 244, 356, 454),
-        f"{ASSET_DIR}/p16_gutter.jpg",
-        radius=12,
-        bg_rgb=NAVY_255,
-        border_rgb=(6, 182, 212),
-        border_px=2,
-    )
-    insert_rounded_photo(
-        page,
-        (36, 468, 356, 658),
-        f"{ASSET_DIR}/p16_spray.jpg",
-        radius=12,
-        bg_rgb=NAVY_255,
-        border_rgb=(30, 41, 59),
-        border_px=2,
-    )
-    insert_rounded_photo(
-        page,
-        (370, 244, PAGE_W - 36, 658),
-        f"{ASSET_DIR}/p16_brush.jpg",
-        radius=12,
-        bg_rgb=NAVY_255,
-        border_rgb=(30, 41, 59),
-        border_px=2,
-    )
+    # 4-Season Pacific Northwest Architectural Showcase Grid (2x2)
+    spring_img = f"{ASSET_V2_DIR}/pnw_spring_estate.jpg" if os.path.exists(f"{ASSET_V2_DIR}/pnw_spring_estate.jpg") else f"{ASSET_V2_DIR}/arch_spring_home.jpg"
+    summer_img = f"{ASSET_V2_DIR}/pnw_summer_estate.jpg" if os.path.exists(f"{ASSET_V2_DIR}/pnw_summer_estate.jpg") else f"{ASSET_V2_DIR}/arch_summer_patio.jpg"
+    fall_img = f"{ASSET_V2_DIR}/pnw_fall_estate.jpg" if os.path.exists(f"{ASSET_V2_DIR}/pnw_fall_estate.jpg") else f"{ASSET_V2_DIR}/site_north.jpg"
+    winter_img = f"{ASSET_V2_DIR}/pnw_winter_estate.jpg" if os.path.exists(f"{ASSET_V2_DIR}/pnw_winter_estate.jpg") else f"{ASSET_V2_DIR}/pnw_winter_lux.jpg"
 
-    strip = pymupdf.Rect(36, 678, PAGE_W - 36, 748)
-    page.draw_rect(strip, color=None, fill=SLATE_900, radius=0.1)
-    page.draw_rect(pymupdf.Rect(36, 678, 42, 748), color=None, fill=CYAN)
+    col_w = (PAGE_W - 72 - 14) / 2.0
+    row_h = 210
+    grid_imgs = [
+        ("SPRING MAINTENANCE", spring_img),
+        ("SUMMER MAINTENANCE", summer_img),
+        ("FALL MAINTENANCE", fall_img),
+        ("WINTER MAINTENANCE", winter_img),
+    ]
+    for i, (label, img_p) in enumerate(grid_imgs):
+        r_i, c_i = divmod(i, 2)
+        x0 = 36 + c_i * (col_w + 14)
+        y0 = 204 + r_i * (row_h + 14)
+        insert_editorial_photo(
+            page,
+            (x0, y0, x0 + col_w, y0 + row_h),
+            img_p,
+            radius=2,
+            bg_rgb=IVORY_255,
+            dark_gradient=True,
+        )
+        add_text(
+            page,
+            (x0 + 14, y0 + row_h - 28, x0 + col_w - 14, y0 + row_h - 8),
+            label,
+            font="PJS-Bold",
+            size=8.5,
+            color=IVORY,
+        )
+
+    # Checklist Index Strip at bottom (matching BuyersGuide.jsx callout box)
+    strip = pymupdf.Rect(36, 654, PAGE_W - 36, 732)
+    page.draw_rect(strip, color=SILVER_LIGHT, fill=WHITE, width=0.8)
+    page.draw_rect(pymupdf.Rect(36, 654, 40, 732), color=None, fill=CHARCOAL)
     add_text(
         page,
-        (56, 688, PAGE_W - 52, 708),
+        (54, 666, PAGE_W - 52, 686),
         "YOUR 5 INTERACTIVE CHECKLISTS:",
-        font="PJS-Bold",
-        size=9.5,
-        color=CYAN_LIGHT,
+        font="PF-Bold",
+        size=11.0,
+        color=CHARCOAL,
     )
     add_text(
         page,
-        (56, 708, PAGE_W - 52, 740),
+        (54, 688, PAGE_W - 52, 724),
         "Page 17: Preventing Pest Issues (8 items)   •   Page 18: Spring (20 items)   •   Page 19: Summer (20 items)\n"
         "Page 20: Fall (20 items)   •   Page 21: Winter (20 items)",
         font="PJS-Med",
         size=9.2,
-        color=SLATE_200,
-        lineheight=1.35,
+        color=CHARCOAL_LIGHT,
+        lineheight=1.38,
     )
 
 
-def build_checklist_page(doc, page_num, slug, title, subtitle, banner_img, items, accent_color=CYAN):
+def build_checklist_page(doc, page_num, slug, title, subtitle, banner_img, items):
     page = doc.new_page(width=PAGE_W, height=PAGE_H)
     register_fonts(page)
+    paint_ivory_canvas(page)
 
-    banner_rect = pymupdf.Rect(36, 28, PAGE_W - 36, 152)
-    insert_rounded_photo(
+    # Top subtle Charcoal bar
+    page.draw_rect(pymupdf.Rect(0, 0, PAGE_W, 4), color=None, fill=CHARCOAL)
+
+    # Top Header Banner Image with Warm Charcoal Editorial Gradient Overlay
+    banner_rect = pymupdf.Rect(36, 24, PAGE_W - 36, 148)
+    insert_editorial_photo(
         page,
         banner_rect,
         banner_img,
-        radius=12,
-        bg_rgb=WHITE_255,
+        radius=2,
+        bg_rgb=IVORY_255,
         dark_gradient=True,
     )
 
-    page.draw_rect(pymupdf.Rect(52, 42, 222, 62), color=None, fill=accent_color, radius=0.2)
-    draw_vector_check(page, 66, 52, size=4.2, color=NAVY, width=1.8)
+    # Outlined Kicker Badge inside Banner
+    badge_rect = pymupdf.Rect(52, 38, 218, 56)
+    page.draw_rect(badge_rect, color=SILVER, fill=CHARCOAL_DARK, width=0.7)
+    draw_vector_check(page, 65, 47, size=4.0, color=IVORY, width=1.6)
     add_text(
         page,
-        (74, 45.5, 220, 60),
+        (74, 41.5, 214, 55),
         "INTERACTIVE CHECKLIST",
-        font="PJS-Extra",
-        size=8.2,
-        color=NAVY,
+        font="PJS-Bold",
+        size=7.6,
+        color=IVORY,
     )
 
     add_text(
         page,
-        (52, 68, 425, 110),
+        (52, 62, 425, 104),
         title,
-        font="PJS-Extra",
+        font="PF-Bold",
         size=24.0,
-        color=WHITE,
+        color=IVORY,
     )
     add_text(
         page,
-        (52, 106, 425, 140),
+        (52, 102, 425, 136),
         subtitle,
-        font="PJS-Med",
-        size=9.5,
-        color=SLATE_200,
+        font="PJS-Reg",
+        size=9.4,
+        color=SILVER_LIGHT,
     )
 
-    # Interactive Year / Date Completed Text Widget in top-right of banner
-    date_card = pymupdf.Rect(432, 44, PAGE_W - 48, 100)
-    page.draw_rect(date_card, color=CYAN_LIGHT, fill=NAVY, width=0.8, radius=0.12)
+    # Interactive Season / Year Text Widget in top-right of banner
+    date_card = pymupdf.Rect(432, 40, PAGE_W - 48, 96)
+    page.draw_rect(date_card, color=SILVER, fill=CHARCOAL_DARK, width=0.8)
     add_text(
         page,
-        (440, 50, PAGE_W - 56, 66),
+        (440, 46, PAGE_W - 56, 62),
         "SEASON / YEAR:",
         font="PJS-Bold",
-        size=7.5,
-        color=CYAN_LIGHT,
+        size=7.2,
+        color=SILVER,
     )
     tf = pymupdf.Widget()
     tf.field_name = f"txt_{slug}_date"
     tf.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
-    tf.rect = pymupdf.Rect(440, 68, PAGE_W - 56, 92)
-    tf.text_color = (0.06, 0.09, 0.16)
-    tf.fill_color = (0.97, 0.98, 0.99)
-    tf.border_color = (0.02, 0.71, 0.83)
+    tf.rect = pymupdf.Rect(440, 64, PAGE_W - 56, 88)
+    tf.text_color = (0.12, 0.16, 0.20)
+    tf.fill_color = (0.98, 0.97, 0.96)
+    tf.border_color = (0.75, 0.75, 0.75)
     tf.border_width = 0.8
     tf.text_fontsize = 9.0
     tf.field_value = ""
     page.add_widget(tf)
 
-    inst_rect = pymupdf.Rect(36, 160, PAGE_W - 36, 182)
-    page.draw_rect(inst_rect, color=None, fill=SLATE_100, radius=0.15)
+    # Instructions bar below banner
+    inst_rect = pymupdf.Rect(36, 156, PAGE_W - 36, 178)
+    page.draw_rect(inst_rect, color=SILVER_LIGHT, fill=WHITE, width=0.7)
+    page.draw_rect(pymupdf.Rect(36, 156, 39.5, 178), color=None, fill=CHARCOAL)
     add_text(
         page,
-        (48, 165, PAGE_W - 48, 180),
+        (48, 161, PAGE_W - 48, 176),
         "PRO TIP:  Click or tap any square checkbox below to check it off digitally, or print this page and check items with a pen!",
         font="PJS-Semi",
-        size=8.4,
-        color=SLATE_700,
+        size=8.2,
+        color=CHARCOAL_LIGHT,
     )
 
     if len(items) <= 10:
-        cy = 192
+        cy = 188
         row_h = 48
         gap = 7
         for idx, item_text in enumerate(items, 1):
             row_rect = pymupdf.Rect(36, cy, PAGE_W - 36, cy + row_h)
-            bg = SLATE_50 if idx % 2 == 1 else SKY_TINT
-            page.draw_rect(row_rect, color=SLATE_200, fill=bg, width=0.7, radius=0.08)
-            page.draw_rect(pymupdf.Rect(36, cy + 8, 39.5, cy + row_h - 8), color=None, fill=accent_color)
+            page.draw_rect(row_rect, color=SILVER_LIGHT, fill=WHITE, width=0.7)
+            page.draw_rect(pymupdf.Rect(36, cy, 39.5, cy + row_h), color=None, fill=CHARCOAL)
 
             cb_rect = pymupdf.Rect(50, cy + (row_h - 18) / 2, 68, cy + (row_h + 18) / 2)
-            page.draw_rect(cb_rect, color=CYAN_DARK, fill=WHITE, width=1.2, radius=0.1)
+            page.draw_rect(cb_rect, color=CHARCOAL, fill=IVORY, width=1.1)
 
             w = pymupdf.Widget()
             w.field_name = f"chk_{slug}_{idx:02d}"
             w.field_type = pymupdf.PDF_WIDGET_TYPE_CHECKBOX
             w.rect = cb_rect
-            w.border_color = (0.03, 0.57, 0.70)
-            w.border_width = 1.2
-            w.fill_color = (1.0, 1.0, 1.0)
-            w.text_color = (0.06, 0.09, 0.16)
+            w.border_color = (0.12, 0.16, 0.20)
+            w.border_width = 1.1
+            w.fill_color = (0.98, 0.97, 0.96)
+            w.text_color = (0.12, 0.16, 0.20)
             w.field_value = False
             page.add_widget(w)
 
@@ -1406,40 +1561,41 @@ def build_checklist_page(doc, page_num, slug, title, subtitle, banner_img, items
                 (78, cy + top_pad, PAGE_W - 48, cy + row_h - 4),
                 item_text,
                 font="PJS-Med",
-                size=10.0,
-                color=NAVY,
+                size=9.8,
+                color=CHARCOAL,
                 lineheight=1.28,
             )
             cy += row_h + gap
 
         notes_box = pymupdf.Rect(36, cy + 4, PAGE_W - 36, 706)
-        page.draw_rect(notes_box, color=SLATE_200, fill=SLATE_50, width=0.8, radius=0.08)
+        page.draw_rect(notes_box, color=SILVER_LIGHT, fill=WHITE, width=0.8)
+        page.draw_rect(pymupdf.Rect(36, cy + 4, 39.5, 706), color=None, fill=CHARCOAL)
         add_text(
             page,
             (48, cy + 10, 440, cy + 26),
             "HOMEOWNER NOTES & SERVICE PRO REMINDERS (FILLABLE):",
             font="PJS-Bold",
-            size=8.5,
-            color=CYAN_DARK,
+            size=8.2,
+            color=CHARCOAL,
         )
         nf = pymupdf.Widget()
         nf.field_name = f"txt_{slug}_notes"
         nf.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
         nf.field_flags = pymupdf.PDF_TX_FIELD_IS_MULTILINE
         nf.rect = pymupdf.Rect(48, cy + 28, PAGE_W - 48, 698)
-        nf.text_color = (0.06, 0.09, 0.16)
-        nf.fill_color = (1.0, 1.0, 1.0)
-        nf.border_color = (0.80, 0.84, 0.90)
+        nf.text_color = (0.12, 0.16, 0.20)
+        nf.fill_color = (0.98, 0.97, 0.96)
+        nf.border_color = (0.80, 0.80, 0.80)
         nf.border_width = 0.7
         nf.text_fontsize = 9.5
         nf.field_value = ""
         page.add_widget(nf)
 
     else:
-        start_y = 192
+        start_y = 188
         col_w = (PAGE_W - 72 - 14) / 2.0
-        row_h = 44.5
-        gap_y = 6.5
+        row_h = 45.0
+        gap_y = 6.2
 
         for idx, item_text in enumerate(items, 1):
             col_idx = 0 if idx <= 10 else 1
@@ -1448,21 +1604,20 @@ def build_checklist_page(doc, page_num, slug, title, subtitle, banner_img, items
             y0 = start_y + row_idx * (row_h + gap_y)
 
             row_rect = pymupdf.Rect(x0, y0, x0 + col_w, y0 + row_h)
-            bg = SLATE_50 if (row_idx + col_idx) % 2 == 0 else SKY_TINT
-            page.draw_rect(row_rect, color=SLATE_200, fill=bg, width=0.65, radius=0.08)
-            page.draw_rect(pymupdf.Rect(x0, y0 + 6, x0 + 3.0, y0 + row_h - 6), color=None, fill=accent_color)
+            page.draw_rect(row_rect, color=SILVER_LIGHT, fill=WHITE, width=0.7)
+            page.draw_rect(pymupdf.Rect(x0, y0, x0 + 3.0, y0 + row_h), color=None, fill=CHARCOAL)
 
             cb_rect = pymupdf.Rect(x0 + 11, y0 + (row_h - 16) / 2, x0 + 27, y0 + (row_h + 16) / 2)
-            page.draw_rect(cb_rect, color=CYAN_DARK, fill=WHITE, width=1.1, radius=0.1)
+            page.draw_rect(cb_rect, color=CHARCOAL, fill=IVORY, width=1.1)
 
             w = pymupdf.Widget()
             w.field_name = f"chk_{slug}_{idx:02d}"
             w.field_type = pymupdf.PDF_WIDGET_TYPE_CHECKBOX
             w.rect = cb_rect
-            w.border_color = (0.03, 0.57, 0.70)
+            w.border_color = (0.12, 0.16, 0.20)
             w.border_width = 1.1
-            w.fill_color = (1.0, 1.0, 1.0)
-            w.text_color = (0.06, 0.09, 0.16)
+            w.fill_color = (0.98, 0.97, 0.96)
+            w.text_color = (0.12, 0.16, 0.20)
             w.field_value = False
             page.add_widget(w)
 
@@ -1472,38 +1627,41 @@ def build_checklist_page(doc, page_num, slug, title, subtitle, banner_img, items
                 (x0 + 34, y0 + top_pad, x0 + col_w - 8, y0 + row_h - 3),
                 item_text,
                 font="PJS-Med",
-                size=9.1,
-                color=NAVY,
+                size=9.0,
+                color=CHARCOAL,
                 lineheight=1.22,
             )
 
+    # Branded Checklist Footer Bar
     f_rect = pymupdf.Rect(36, 718, PAGE_W - 36, 764)
-    page.draw_rect(f_rect, color=None, fill=NAVY, radius=0.1)
-    page.draw_rect(pymupdf.Rect(36, 718, 42, 764), color=None, fill=accent_color)
+    page.draw_rect(f_rect, color=SILVER_LIGHT, fill=CHARCOAL, width=0.8)
 
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
         (48, 723, 84, 759),
         f"{PUBLIC_DIR}/loki-profile.jpg",
-        radius=6,
-        bg_rgb=NAVY_255,
+        radius=2,
+        bg_rgb=CHARCOAL_255,
         centering=(0.5, 0.2),
+        grade=False,
+        border_rgb=(192, 192, 192),
+        border_px=1,
     )
     add_text(
         page,
-        (94, 724, 415, 742),
+        (94, 724, 430, 742),
         "Your Trusted REALTOR®  —  Lokesh Chanana (Loki)",
-        font="PJS-Extra",
-        size=10.5,
-        color=WHITE,
+        font="PF-Bold",
+        size=11.0,
+        color=IVORY,
     )
     add_text(
         page,
-        (94, 741, 465, 758),
+        (94, 742, 480, 758),
         "Need a trusted local contractor or service pro? Call/Text (801) 860-1052  •  lokeshchanana.com",
         font="PJS-Med",
-        size=8.4,
-        color=CYAN_LIGHT,
+        size=8.3,
+        color=SILVER,
     )
     page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(310, 740, 395, 758), "uri": "tel:+18018601052"})
     page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(400, 740, 500, 758), "uri": "https://lokeshchanana.com"})
@@ -1512,9 +1670,9 @@ def build_checklist_page(doc, page_num, slug, title, subtitle, banner_img, items
         page,
         (PAGE_W - 92, 732, PAGE_W - 48, 752),
         f"PAGE {page_num:02d}",
-        font="PJS-Bold",
+        font="PF-Bold",
         size=8.5,
-        color=SLATE_400,
+        color=IVORY,
         align=2,
     )
 
@@ -1522,40 +1680,43 @@ def build_checklist_page(doc, page_num, slug, title, subtitle, banner_img, items
 def build_page_22_back_cover(doc):
     page = doc.new_page(width=PAGE_W, height=PAGE_H)
     register_fonts(page)
+    paint_ivory_canvas(page)
 
-    page.draw_rect(pymupdf.Rect(0, 0, PAGE_W, PAGE_H), color=None, fill=NAVY)
-    page.draw_rect(pymupdf.Rect(0, 0, PAGE_W, 8), color=None, fill=CYAN)
+    page.draw_rect(pymupdf.Rect(0, 0, PAGE_W, 6), color=None, fill=CHARCOAL)
 
-    insert_rounded_photo(
+    # Top Hero Image (Pacific Northwest Waterfront Architecture)
+    insert_editorial_photo(
         page,
-        (36, 36, PAGE_W - 36, 326),
-        f"{ASSET_DIR}/hero_foyer.jpg",
-        radius=14,
-        bg_rgb=NAVY_255,
-        border_rgb=(6, 182, 212),
-        border_px=2,
+        (36, 32, PAGE_W - 36, 318),
+        f"{ASSET_V2_DIR}/site_eastside.jpg",
+        radius=2,
+        bg_rgb=IVORY_255,
+        sat=0.55,
     )
 
-    card = pymupdf.Rect(36, 344, PAGE_W - 36, 586)
-    page.draw_rect(card, color=SLATE_700, fill=SLATE_900, width=1.0, radius=0.05)
-    page.draw_rect(pymupdf.Rect(36, 344, PAGE_W - 36, 350), color=None, fill=CYAN)
+    # Main Closing Editorial Card (White on Ivory with Charcoal left accent)
+    card = pymupdf.Rect(36, 334, PAGE_W - 36, 580)
+    page.draw_rect(card, color=SILVER_LIGHT, fill=WHITE, width=0.8)
+    page.draw_rect(pymupdf.Rect(36, 334, PAGE_W - 36, 338), color=None, fill=CHARCOAL)
+
+    draw_kicker_badge(page, 36, 354, "HERE FOR YOU BEYOND THE SALE", align_center=True)
 
     add_text(
         page,
-        (56, 366, PAGE_W - 56, 404),
+        (56, 382, PAGE_W - 56, 420),
         "I'm Only a Phone Call Away!",
-        font="PJS-Extra",
+        font="PF-Bold",
         size=25.0,
-        color=WHITE,
+        color=CHARCOAL,
         align=1,
     )
     add_text(
         page,
-        (56, 404, PAGE_W - 56, 430),
-        "Welcome home!",
-        font="PJS-Bold",
-        size=14.0,
-        color=CYAN_LIGHT,
+        (56, 418, PAGE_W - 56, 444),
+        "Welcome home.",
+        font="PF-Ital",
+        size=15.0,
+        color=CHARCOAL_LIGHT,
         align=1,
     )
 
@@ -1567,43 +1728,45 @@ def build_page_22_back_cover(doc):
     )
     add_text(
         page,
-        (68, 436, PAGE_W - 68, 574),
+        (68, 448, PAGE_W - 68, 570),
         closing_msg,
         font="PJS-Reg",
-        size=10.8,
-        color=SLATE_200,
+        size=10.5,
+        color=CHARCOAL_LIGHT,
         align=1,
         lineheight=1.42,
     )
 
-    bcard = pymupdf.Rect(36, 602, PAGE_W - 36, 752)
-    page.draw_rect(bcard, color=CYAN, fill=SLATE_900, width=1.2, radius=0.06)
+    # Bottom Agent Business Card (Crisp White & Charcoal Editorial Card)
+    bcard = pymupdf.Rect(36, 596, PAGE_W - 36, 752)
+    page.draw_rect(bcard, color=SILVER_LIGHT, fill=CHARCOAL, width=0.8)
 
-    insert_rounded_photo(
+    insert_editorial_photo(
         page,
-        (56, 618, 152, 736),
+        (56, 614, 152, 734),
         f"{PUBLIC_DIR}/loki-profile.jpg",
-        radius=10,
-        bg_rgb=SLATE_900_255,
+        radius=2,
+        bg_rgb=CHARCOAL_255,
         centering=(0.5, 0.2),
-        border_rgb=(56, 189, 248),
+        grade=False,
+        border_rgb=(192, 192, 192),
         border_px=2,
     )
 
-    add_text(page, (172, 620, 430, 638), "YOUR TRUSTED REALTOR®", font="PJS-Bold", size=8.5, color=CYAN_LIGHT)
-    add_text(page, (172, 636, 430, 664), "Lokesh Chanana (Loki)", font="PJS-Extra", size=18.0, color=WHITE)
-    add_text(page, (172, 662, 430, 680), "Real Broker LLC  •  License #26006634", font="PJS-Med", size=9.5, color=SLATE_200)
+    add_text(page, (172, 616, 430, 634), "YOUR TRUSTED REALTOR®", font="PJS-Bold", size=8.0, color=SILVER)
+    add_text(page, (172, 632, 430, 662), "Lokesh Chanana (Loki)", font="PF-Bold", size=18.5, color=IVORY)
+    add_text(page, (172, 660, 430, 678), "Real Broker LLC  •  License #26006634", font="PJS-Med", size=9.2, color=SILVER)
 
-    add_text(page, (172, 686, 430, 704), "CALL / TEXT:  (801) 860-1052", font="PJS-Bold", size=10.0, color=WHITE)
-    add_text(page, (172, 704, 430, 722), "EMAIL:  lokesh@lokeshchanana.com", font="PJS-Med", size=9.6, color=SLATE_200)
-    add_text(page, (172, 722, 430, 740), "WEB:  https://lokeshchanana.com", font="PJS-Bold", size=9.6, color=CYAN_LIGHT)
+    add_text(page, (172, 684, 430, 702), "CALL / TEXT:  (801) 860-1052", font="PJS-Bold", size=9.8, color=IVORY)
+    add_text(page, (172, 702, 430, 720), "EMAIL:  lokesh@lokeshchanana.com", font="PJS-Med", size=9.4, color=SILVER_LIGHT)
+    add_text(page, (172, 720, 430, 738), "WEB:  https://lokeshchanana.com", font="PJS-Bold", size=9.4, color=IVORY)
 
-    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(172, 685, 340, 704), "uri": "tel:+18018601052"})
-    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(172, 704, 380, 722), "uri": "mailto:lokesh@lokeshchanana.com"})
-    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(172, 722, 380, 740), "uri": "https://lokeshchanana.com"})
+    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(172, 683, 340, 702), "uri": "tel:+18018601052"})
+    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(172, 702, 380, 720), "uri": "mailto:lokesh@lokeshchanana.com"})
+    page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(172, 720, 380, 738), "uri": "https://lokeshchanana.com"})
 
-    insert_logo_on_bg(page, (455, 618, 555, 682), f"{PUBLIC_DIR}/lc-logo.png", bg_rgb=SLATE_900_255)
-    insert_logo_on_bg(page, (462, 692, 548, 728), f"{PUBLIC_DIR}/real-logo.png", bg_rgb=SLATE_900_255, invert_white_bg=True)
+    insert_logo(page, (455, 616, 555, 680), f"{PUBLIC_DIR}/lc-logo.png", bg_rgb=CHARCOAL_255, target_rgb=IVORY_255)
+    insert_logo(page, (462, 690, 548, 726), f"{PUBLIC_DIR}/real-logo.png", bg_rgb=CHARCOAL_255, target_rgb=IVORY_255, is_real_logo=True)
 
 
 def main():
@@ -1641,11 +1804,12 @@ def main():
         17,
         "pest",
         "Preventing Pest Issues",
-        "Proactive steps to keep your home pest-free all year long",
-        f"{ASSET_DIR}/p17_pest.jpg",
+        "Proactive steps to keep your home's exterior envelope pest-free all year long",
+        f"{ASSET_V2_DIR}/arch_modern_ext.jpg",
         pest_items,
     )
 
+    spring_img = f"{ASSET_V2_DIR}/pnw_spring_estate.jpg" if os.path.exists(f"{ASSET_V2_DIR}/pnw_spring_estate.jpg") else f"{ASSET_V2_DIR}/arch_spring_home.jpg"
     spring_items = [
         "Inspect roof for winter damage (shingles, flashing)",
         "Clean gutters and downspouts for spring rains",
@@ -1674,10 +1838,11 @@ def main():
         "spring",
         "Spring Home Maintenance",
         "Refresh your home after winter and get ready for warmer days",
-        f"{ASSET_DIR}/p18_spring.jpg",
+        spring_img,
         spring_items,
     )
 
+    summer_img = f"{ASSET_V2_DIR}/pnw_summer_estate.jpg" if os.path.exists(f"{ASSET_V2_DIR}/pnw_summer_estate.jpg") else f"{ASSET_V2_DIR}/arch_summer_patio.jpg"
     summer_items = [
         "Inspect and clean air conditioner coils and filters",
         "Test and repair outdoor lighting",
@@ -1705,11 +1870,12 @@ def main():
         19,
         "summer",
         "Summer Home Maintenance",
-        "Keep your home cool, efficient, and ready for summer fun",
-        f"{ASSET_DIR}/p19_summer.jpg",
+        "Keep your home cool, efficient, and ready for summer living",
+        summer_img,
         summer_items,
     )
 
+    fall_img = f"{ASSET_V2_DIR}/pnw_fall_estate.jpg" if os.path.exists(f"{ASSET_V2_DIR}/pnw_fall_estate.jpg") else f"{ASSET_V2_DIR}/site_north.jpg"
     fall_items = [
         "Clean gutters and downspouts after leaves fall",
         "Inspect roof for any signs of damage",
@@ -1738,10 +1904,11 @@ def main():
         "fall",
         "Fall Home Maintenance",
         "Prepare your home's heating, exterior, and drainage before winter arrives",
-        f"{ASSET_DIR}/p20_fall.jpg",
+        fall_img,
         fall_items,
     )
 
+    winter_img = f"{ASSET_V2_DIR}/pnw_winter_estate.jpg" if os.path.exists(f"{ASSET_V2_DIR}/pnw_winter_estate.jpg") else f"{ASSET_V2_DIR}/pnw_winter_lux.jpg"
     winter_items = [
         "Inspect roof for snow or ice damage",
         "Clean gutters and remove icicles",
@@ -1770,7 +1937,7 @@ def main():
         "winter",
         "Winter Home Maintenance",
         "Protect your home from cold weather, freezing pipes, and winter storms",
-        f"{ASSET_DIR}/p21_winter.jpg",
+        winter_img,
         winter_items,
     )
 
