@@ -1218,13 +1218,24 @@ async def _send_brevo_template(
     params: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     url = f"{BREVO_BASE_URL}/v3/smtp/email"
-    payload = {
+    payload: Dict[str, Any] = {
         "to": [{"email": email.strip().lower(), "name": name or "Valued Client"}],
         "templateId": int(template_id),
         "params": params or {},
     }
+    if int(template_id) == 6:
+        guide_url = os.environ.get(
+            "MAINTENANCE_GUIDE_PDF_URL",
+            "https://dev.lokeshchanana.com/home-maintenance-guide.pdf",
+        )
+        payload["attachment"] = [
+            {
+                "url": guide_url,
+                "name": "Home_Maintenance_Guide_Lokesh_Chanana.pdf",
+            }
+        ]
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(url, headers=_brevo_headers(), json=payload)
             if resp.status_code in (200, 201, 202):
                 data = resp.json()
