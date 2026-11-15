@@ -244,9 +244,14 @@ if [ -f "${REPO_DIR}/scripts/casa-poki-sync.sh" ]; then
   chmod +x /usr/local/bin/casa-poki-sync.sh
   cp -a "${REPO_DIR}/scripts/systemd/casa-poki-sync.service" /etc/systemd/system/
   cp -a "${REPO_DIR}/scripts/systemd/casa-poki-sync.timer" /etc/systemd/system/
+  if [ -f "${REPO_DIR}/scripts/systemd/gdrive-bills-sync.service" ]; then
+    cp -a "${REPO_DIR}/scripts/systemd/gdrive-bills-sync.service" /etc/systemd/system/
+    cp -a "${REPO_DIR}/scripts/systemd/gdrive-bills-sync.timer" /etc/systemd/system/
+    systemctl enable --now gdrive-bills-sync.timer
+  fi
   systemctl daemon-reload
   systemctl enable --now casa-poki-sync.timer
-  log_ok "Nightly replication timer enabled."
+  log_ok "Nightly replication and Google Drive bills ingestion timers enabled."
 fi
 
 echo "========================================================================"

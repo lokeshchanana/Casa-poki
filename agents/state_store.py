@@ -196,6 +196,23 @@ def init_store() -> None:
         """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS processed_drive_bills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id TEXT UNIQUE NOT NULL,
+            file_name TEXT NOT NULL,
+            vendor_name TEXT,
+            amount REAL,
+            bill_date TEXT,
+            bill_id INTEGER,
+            status TEXT NOT NULL,
+            details TEXT,
+            processed_at TEXT NOT NULL
+        )
+        """
+    )
+
     conn.commit()
     conn.close()
 
@@ -1133,5 +1150,81 @@ def cancel_post_close_drip(contact_id_or_email: str) -> bool:
     conn.commit()
     conn.close()
     return changed
+
+
+def is_drive_bill_processed(file_id: str) -> bool:
+    """Checks if a Google Drive bill file has already been processed into Bigcapital."""
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM processed_drive_bills WHERE file_id = ?", (file_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row is not None
+
+
+def record_processed_drive_bill(
+    file_id: str,
+    file_name: str,
+    vendor_name: str,
+    amount: float,
+    bill_date: str,
+    bill_id: Optional[int] = None,
+    status: str = "PROCESSED",
+    details: Optional[str] = None,
+) -> int:
+    """Records or updates a processed Google Drive bill record in the local database."""
+    init_store()
+    now = datetime.utcnow().isoformat() + "Z"
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO processed_drive_bills (file_id, file_name, vendor_name, amount, bill_date, bill_id, status, details, processed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(file_id) DO UPDATE SET
+            file_name = excluded.file_name,
+            vendor_name = excluded.vendor_name,
+            amount = excluded.amount,
+            bill_date = excluded.bill_date,
+            bill_id = excluded.bill_id,
+            status = excluded.status,
+            details = excluded.details,
+            processed_at = excluded.processed_at
+        """,
+        (file_id, file_name, vendor_name, amount, bill_date, bill_id, status, details, now),
+    )
+    last_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return last_id
+
+
+def list_processed_drive_bills(limit: int = 50) -> List[Dict[str, Any]]:
+    """Returns recent processed Google Drive bills from the database."""
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT * FROM processed_drive_bills ORDER BY id DESC LIMIT ?",
+        (limit,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_processed_drive_bill(file_id: str) -> bool:
+    """Removes a processed drive bill entry (e.g. for re-processing or test cleanup)."""
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM processed_drive_bills WHERE file_id = ?", (file_id,))
+    deleted = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
 
 

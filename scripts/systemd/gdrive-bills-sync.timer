@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic Check of Google Drive Folder for Bills & Receipts (Every 15 min)
+Requires=gdrive-bills-sync.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

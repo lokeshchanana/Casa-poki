@@ -742,6 +742,26 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "finance_scan_drive_bills",
+            "description": "Scans the designated Google Drive folder for bills and receipts, performs OCR on PDF and image documents, extracts vendor, amount, date, and category, and ingests new bills into Bigcapital accounting with deduplication.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "folder_id": {
+                        "type": "string",
+                        "description": "Google Drive folder ID to scan. Defaults to configured bills folder '1mj2jCnKsQGsdf4zV5R9dlr3SKthE3mNQ'.",
+                    },
+                    "force_reprocess": {
+                        "type": "boolean",
+                        "description": "Set to true to reprocess files even if they were already recorded in the database. Defaults to false.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "mailman_read_inbox",
             "description": "Silas Drake (Mail Courier & Dispatcher) connects to lokesh@lokeshchanana.com to fetch, read, and triage unread incoming emails, bringing structured email intelligence to Marcus Vance for routing (Finance bills to Fiona, CRM leads to Miles, CMA to Carter, marketing to Maya, or discarding spam).",
             "parameters": {
@@ -2244,6 +2264,18 @@ async def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         res["duration_ms"] = int((time.time() - start_ts) * 1000)
         return res
 
+    if name == "finance_scan_drive_bills":
+        from gdrive_bills_watcher import scan_and_ingest_drive_bills
+
+        folder_id = args.get("folder_id")
+        force_reprocess = args.get("force_reprocess", False)
+        kwargs = {"force_reprocess": force_reprocess}
+        if folder_id:
+            kwargs["folder_id"] = folder_id
+        res = await scan_and_ingest_drive_bills(**kwargs)
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
     # Mailman Inbox Handler
     if name == "mailman_read_inbox":
         res = await _execute_mailman_inbox(args)
@@ -2645,6 +2677,34 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
             f"- **Status:** {result.get('message', 'Operation completed successfully.')}\n"
             f"- **Portal:** [https://finance.lokeshchanana.com](https://finance.lokeshchanana.com)"
         )
+
+    if tool_name == "finance_scan_drive_bills":
+        scanned = result.get("scanned_count", 0)
+        new_cnt = result.get("newly_ingested_count", 0)
+        already_cnt = result.get("already_processed_count", 0)
+        err_cnt = result.get("error_count", 0)
+        folder = result.get("folder_id", "")
+        lines = [
+            f"### 📂 Google Drive Bills Scanner — Fiona Banks",
+            f"- **Folder Scanned:** `{folder}`",
+            f"- **Total Files Found:** {scanned}",
+            f"- **Newly Ingested Bills:** {new_cnt}",
+            f"- **Already Processed (Deduplicated):** {already_cnt}",
+        ]
+        if err_cnt > 0:
+            lines.append(f"- **Errors/Flagged:** {err_cnt}")
+        new_bills = result.get("new_bills", [])
+        if new_bills:
+            lines.append("\n**Newly Ingested Bills into Bigcapital:**")
+            for b in new_bills:
+                lines.append(
+                    f"- **{b.get('vendor')}**: ${b.get('amount', 0.0):,.2f} "
+                    f"(Date: {b.get('bill_date')}, Category: `{b.get('category')}`, File: `{b.get('file_name')}`)"
+                )
+        if already_cnt > 0 and not new_bills:
+            lines.append("\n*All scanned receipts in this folder have already been recorded into Bigcapital.*")
+        lines.append(f"- **Accounting Portal:** [https://finance.lokeshchanana.com](https://finance.lokeshchanana.com)")
+        return "\n".join(lines)
 
     if tool_name == "mailman_read_inbox":
         account = result.get("account", "lokesh@lokeshchanana.com")

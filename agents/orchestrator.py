@@ -101,6 +101,7 @@ LIFECYCLE & DEAL RULES:
         "system_prompt": """You are Fiona Banks, Financial Controller for Casa-poki and Lokesh Chanana Real Estate.
 You manage all financial accounting through Bigcapital hosted at https://finance.lokeshchanana.com.
 You have direct tools to:
+- Monitor and scan Google Drive folders for bills and receipts (`finance_scan_drive_bills`). The default monitored bills folder is `1mj2jCnKsQGsdf4zV5R9dlr3SKthE3mNQ` ("Expanses").
 - Record incoming bills and invoices (`finance_record_bill`)
 - Update existing bills, change due dates, amounts, notes, or categories (`finance_update_bill`)
 - Settle and record bill payments (`finance_record_payment`, `finance_manage_bill_payments`)
@@ -109,6 +110,7 @@ You have direct tools to:
 - Ingest batches of historical bills and receipts (`finance_import_historical_bills`)
 - Perform unconstrained dynamic CRUD operations on any Bigcapital entity (`finance_entity_operation`)
 Whenever the user or an incoming email/message presents a bill, payment, or vendor modification, extract the relevant fields and record or update it into Bigcapital.
+When instructed to monitor, check, or scan Google Drive or a folder for bills, invoke `finance_scan_drive_bills`.
 When asked about finances, summarize accounts payable, upcoming due bills, and provide the portal link https://finance.lokeshchanana.com.""",
     },
     "marketing": {
@@ -170,7 +172,7 @@ CORE CAPABILITIES & GUIDELINES:
 1. Tool Invocation & Delegation:
    - When the user asks to check, read, triage, or fetch incoming emails from lokesh@lokeshchanana.com, invoke `mailman_read_inbox` or delegate to Silas Drake ('mailman').
    - When Silas Drake presents emails, analyze each message and decide what needs to be done:
-     * Finance email or task (invoices, utility bills, receipts, payment notices, vendor updates, bill edits) -> Delegate to Fiona Banks ('finance') or call finance tools directly (`finance_record_bill`, `finance_update_bill`, `finance_manage_vendors`, `finance_entity_operation`).
+     * Finance email, task, or receipt monitoring (invoices, utility bills, receipts, Google Drive bills folder `1mj2jCnKsQGsdf4zV5R9dlr3SKthE3mNQ`, payment notices, vendor updates, bill edits) -> Delegate to Fiona Banks ('finance') or invoke `finance_scan_drive_bills`, `finance_record_bill`, `finance_update_bill`, `finance_manage_vendors`, `finance_entity_operation`.
      * CRM related email (buyer/seller inquiries, new leads, client updates) -> Delegate to Miles Miller ('intake') or call `create_contact` / `manage_notes` in Twenty CRM.
      * CMA / valuation request -> Delegate to Carter Hayes ('cma') for MLS comps.
      * Marketing / post-close drip / promotional request -> Delegate to Maya Reyes ('marketing') or invoke `enroll_buyer_post_close` / `list_post_close_drips` / `process_post_close_drips`.
@@ -525,7 +527,7 @@ def detect_message_domain(text: str) -> str:
     finance_kw = [
         "bigcapital", "fiona banks", "bill", "bills", "invoice", "invoices",
         "accounts payable", "vendor", "vendors", "payable", "financial dashboard",
-        "expenses", "cost till now", "payable"
+        "expenses", "expanses", "receipt", "receipts", "cost till now", "payable"
     ]
     if any(k in t for k in finance_kw):
         return "FINANCE_ACCOUNTING"
