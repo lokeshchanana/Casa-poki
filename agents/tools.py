@@ -475,6 +475,182 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "finance_update_bill",
+            "description": "Update an existing bill in Bigcapital accounting (amount, due_date, bill_date, note, reference_no, status, or vendor).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bill_id": {
+                        "type": "integer",
+                        "description": "The Bigcapital Bill ID to update",
+                    },
+                    "vendor_name": {
+                        "type": "string",
+                        "description": "Optional: Vendor name to update to, or to identify bill if bill_id unknown",
+                    },
+                    "reference_no": {
+                        "type": "string",
+                        "description": "Invoice number or billing reference",
+                    },
+                    "amount": {
+                        "type": "number",
+                        "description": "New total amount in USD",
+                    },
+                    "due_date": {
+                        "type": "string",
+                        "description": "New due date in YYYY-MM-DD format",
+                    },
+                    "bill_date": {
+                        "type": "string",
+                        "description": "New bill issue date in YYYY-MM-DD format",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Updated description or notes",
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Expense category (e.g. 'Utilities', 'Software', 'Rent')",
+                    },
+                    "open": {
+                        "type": "boolean",
+                        "description": "True if bill remains open/unpaid, False for draft or closed",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "finance_manage_vendors",
+            "description": "Manage vendor suppliers in Bigcapital (list, get, create, update, delete).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "get", "create", "update", "delete"],
+                        "description": "Action to perform on vendors",
+                    },
+                    "vendor_id": {
+                        "type": "integer",
+                        "description": "Vendor ID (required for get, update, delete)",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Vendor display or company name",
+                    },
+                    "email": {
+                        "type": "string",
+                        "description": "Vendor billing or contact email",
+                    },
+                    "phone": {
+                        "type": "string",
+                        "description": "Vendor work phone number",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Vendor account notes or payment terms",
+                    },
+                    "company_name": {
+                        "type": "string",
+                        "description": "Official company legal name",
+                    },
+                    "website": {
+                        "type": "string",
+                        "description": "Vendor portal URL or website",
+                    },
+                    "address": {
+                        "type": "string",
+                        "description": "Billing address line 1",
+                    },
+                    "city": {
+                        "type": "string",
+                        "description": "Billing city",
+                    },
+                    "state": {
+                        "type": "string",
+                        "description": "Billing state",
+                    },
+                    "postcode": {
+                        "type": "string",
+                        "description": "Billing ZIP/postal code",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Number of vendors to list (default 50)",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "finance_manage_bill_payments",
+            "description": "Inspect, list, or delete/void bill payment settlements in Bigcapital.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "get", "delete"],
+                        "description": "Action to perform: 'list' payments, 'get' details, or 'delete' payment",
+                    },
+                    "payment_id": {
+                        "type": "integer",
+                        "description": "Payment ID (required for get or delete)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Number of payments to list (default 20)",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "finance_entity_operation",
+            "description": "Universal dynamic CRUD gateway for Bigcapital accounting. Execute arbitrary operations (get, list, create, update, delete) against any Bigcapital collection (bills, vendors, bill-payments, accounts, items, customers, sale-invoices, expenses).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity": {
+                        "type": "string",
+                        "enum": ["bills", "vendors", "bill-payments", "accounts", "items", "customers", "sale-invoices", "expenses"],
+                        "description": "The Bigcapital entity collection to operate on",
+                    },
+                    "action": {
+                        "type": "string",
+                        "enum": ["get", "list", "create", "update", "delete"],
+                        "description": "CRUD action to execute",
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Record ID (required for get, update, delete)",
+                    },
+                    "data": {
+                        "type": "object",
+                        "description": "Key-value dictionary with payload attributes",
+                    },
+                    "filter": {
+                        "type": "string",
+                        "description": "Query or filter string for list operations",
+                    },
+                },
+                "required": ["entity", "action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "finance_record_payment",
             "description": "Record a payment or settlement for an open bill in Bigcapital accounting.",
             "parameters": {
@@ -2048,6 +2224,26 @@ async def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         res["duration_ms"] = int((time.time() - start_ts) * 1000)
         return res
 
+    if name == "finance_update_bill":
+        res = await bigcapital_client.update_bill(**args)
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
+    if name == "finance_manage_vendors":
+        res = await bigcapital_client.manage_vendors(**args)
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
+    if name == "finance_manage_bill_payments":
+        res = await bigcapital_client.manage_bill_payments(**args)
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
+    if name == "finance_entity_operation":
+        res = await bigcapital_client.entity_operation(**args)
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
     # Mailman Inbox Handler
     if name == "mailman_read_inbox":
         res = await _execute_mailman_inbox(args)
@@ -2383,6 +2579,71 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
             f"- **Successfully Imported:** `{result.get('imported', 0)}`\n"
             f"- **Failed:** `{result.get('failed', 0)}`\n"
             f"- **Portal:** [View in Bigcapital](https://finance.lokeshchanana.com)"
+        )
+
+    if tool_name == "finance_update_bill":
+        return (
+            f"### 🧾 Bill Updated in Bigcapital\n"
+            f"- **Bill ID:** `#{result.get('bill_id')}`\n"
+            f"- **Amount:** **${result.get('amount', 0):,.2f} USD**\n"
+            f"- **Due Date:** `{result.get('due_date')}` | **Bill Date:** `{result.get('bill_date')}`\n"
+            f"- **Status:** `{result.get('status')}`\n"
+            f"- **Note:** {result.get('note') or 'N/A'}\n"
+            f"- **Portal:** [View in Bigcapital](https://finance.lokeshchanana.com)\n\n"
+            f"{result.get('message', '')}"
+        )
+
+    if tool_name == "finance_manage_vendors":
+        act = (result.get("action") or args.get("action") or "list").lower()
+        if act == "list":
+            vendors = result.get("vendors", [])
+            if not vendors:
+                return "### 🏢 Bigcapital Vendors\nNo vendors found matching query."
+            lines = [f"### 🏢 Bigcapital Vendors (`{len(vendors)}` listed)\n"]
+            lines.append("| ID | Name / Company | Email | Phone | Status |")
+            lines.append("|---|---|---|---|---|")
+            for v in vendors:
+                name = v.get("display_name") or v.get("company_name") or "Vendor"
+                lines.append(f"| `#{v.get('id')}` | **{name}** | `{v.get('email') or 'N/A'}` | `{v.get('work_phone') or 'N/A'}` | `{'Active' if v.get('active', True) else 'Inactive'}` |")
+            lines.append(f"\n[Open Bigcapital Portal](https://finance.lokeshchanana.com)")
+            return "\n".join(lines)
+        return (
+            f"### 🏢 Bigcapital Vendor Action: {act.upper()}\n"
+            f"- **Vendor ID:** `#{result.get('vendor_id') or args.get('vendor_id') or 'N/A'}`\n"
+            f"- **Vendor:** **{result.get('name') or args.get('name') or 'N/A'}**\n"
+            f"- **Status:** {result.get('message', 'Operation successful')}\n"
+            f"- **Portal:** [View in Bigcapital](https://finance.lokeshchanana.com)"
+        )
+
+    if tool_name == "finance_manage_bill_payments":
+        act = (result.get("action") or args.get("action") or "list").lower()
+        if act == "list":
+            payments = result.get("payments", [])
+            if not payments:
+                return "### 💳 Bigcapital Bill Payments\nNo payments found."
+            lines = [f"### 💳 Bigcapital Bill Payments (`{len(payments)}` listed)\n"]
+            lines.append("| ID | Payment Number | Amount | Date | Reference |")
+            lines.append("|---|---|---|---|---|")
+            for p in payments:
+                lines.append(f"| `#{p.get('id')}` | `{p.get('payment_number')}` | ${float(p.get('amount', 0)):,.2f} | `{p.get('payment_date')}` | `{p.get('reference_no') or 'N/A'}` |")
+            lines.append(f"\n[Open Bigcapital Portal](https://finance.lokeshchanana.com)")
+            return "\n".join(lines)
+        return (
+            f"### 💳 Bigcapital Payment Action: {act.upper()}\n"
+            f"- **Payment ID:** `#{result.get('payment_id') or args.get('payment_id')}`\n"
+            f"- **Status:** {result.get('message', 'Operation successful')}\n"
+            f"- **Portal:** [View in Bigcapital](https://finance.lokeshchanana.com)"
+        )
+
+    if tool_name == "finance_entity_operation":
+        action = (result.get("action") or args.get("action") or "operation").upper()
+        entity = result.get("entity") or args.get("entity") or "record"
+        res_id = result.get("id") or args.get("id") or ""
+        id_str = f" (ID: `#{res_id}`)" if res_id else ""
+        return (
+            f"### 💼 Bigcapital Dynamic Operation: {action} `{entity}`{id_str}\n"
+            f"- **Status:** {result.get('message', 'Operation completed successfully.')}\n"
+            f"- **Portal:** [https://finance.lokeshchanana.com](https://finance.lokeshchanana.com)"
         )
 
     if tool_name == "mailman_read_inbox":

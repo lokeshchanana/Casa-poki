@@ -19,6 +19,14 @@ BIGCAPITAL_API_KEY = os.environ.get(
 )
 
 
+def _snake_to_camel(s: str) -> str:
+    """Converts snake_case string to camelCase. Leaves camelCase or single words unchanged."""
+    if "_" not in s:
+        return s
+    parts = s.split("_")
+    return parts[0] + "".join(x.capitalize() for x in parts[1:])
+
+
 class BigcapitalClient:
     """Async API Client for Bigcapital Core Accounting."""
 
@@ -252,6 +260,433 @@ class BigcapitalClient:
         """Delete a bill by ID (used for test cleanups and cancellations)."""
         res = await self._request("DELETE", f"/api/bills/{bill_id}")
         return res
+
+    async def update_bill(
+        self,
+        bill_id: Optional[int] = None,
+        vendor_name: Optional[str] = None,
+        reference_no: Optional[str] = None,
+        amount: Optional[float] = None,
+        due_date: Optional[str] = None,
+        bill_date: Optional[str] = None,
+        note: Optional[str] = None,
+        category: Optional[str] = None,
+        open: Optional[bool] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Update an existing bill in Bigcapital (PUT /api/bills/{bill_id})."""
+        # 1. Resolve bill_id if not given directly
+        if not bill_id:
+            bills_res = await self.list_bills(limit=100)
+            if bills_res.get("ok"):
+                for b in bills_res.get("bills", []):
+                    b_ref = (b.get("reference_no") or b.get("referenceNo") or "").lower()
+                    b_vname = (b.get("vendor_name") or "").lower()
+                    b_num = (b.get("bill_number") or b.get("billNumber") or "").lower()
+                    if reference_no and reference_no.lower() in (b_ref, b_num):
+                        bill_id = b.get("id")
+                        break
+                    if vendor_name and vendor_name.lower() in b_vname:
+                        bill_id = b.get("id")
+                        break
+        if not bill_id:
+            return {"ok": False, "error": "bill_id is required or could not be resolved from vendor/reference."}
+
+        # 2. Fetch current bill data
+        curr_res = await self._request("GET", f"/api/bills/{bill_id}")
+        if not curr_res.get("ok"):
+            return {"ok": False, "error": f"Bill #{bill_id} not found: {curr_res.get('error')}"}
+        curr = curr_res.get("data", {})
+
+        # 3. Resolve vendor if vendor_name was passed and changed
+        vendor_id = curr.get("vendor_id") or curr.get("vendorId")
+        if vendor_name:
+            v_res = await self.get_or_create_vendor(vendor_name)
+            if v_res.get("ok"):
+                vendor_id = v_res.get("vendor_id")
+
+        # 4. Handle entries / rate
+        entries = curr.get("entries") or []
+        if amount is not None:
+            amt_float = float(amount)
+            if entries:
+                entries[0]["rate"] = amt_float
+                if note or category:
+                    desc = note or entries[0].get("description") or f"Bill #{bill_id}"
+                    entries[0]["description"] = f"[{category}] {desc}" if category else desc
+            else:
+                item_id = await self.get_default_item_id()
+                entries = [{
+                    "index": 1,
+                    "itemId": item_id,
+                    "rate": amt_float,
+                    "quantity": 1,
+                    "description": f"[{category}] {note}" if category else (note or f"Bill #{bill_id}"),
+                    "costAccountId": 1020,
+                }]
+
+        # 5. Build PUT payload preserving required Bigcapital fields
+        payload = {
+            "vendorId": vendor_id,
+            "billNumber": curr.get("bill_number") or curr.get("billNumber"),
+            "billDate": bill_date or curr.get("bill_date") or curr.get("billDate"),
+            "dueDate": due_date or curr.get("due_date") or curr.get("dueDate"),
+            "referenceNo": reference_no or curr.get("reference_no") or curr.get("referenceNo"),
+            "note": note if note is not None else (curr.get("note") or ""),
+            "open": open if open is not None else curr.get("open", True),
+            "entries": entries,
+        }
+
+        # Dynamically map any extra kwargs
+        for k, v in kwargs.items():
+            if k not in ("tool", "action", "direct", "sessionId", "session_id") and v is not None:
+                payload[_snake_to_camel(k)] = v
+
+        res = await self._request("PUT", f"/api/bills/{bill_id}", payload=payload)
+        if res.get("ok"):
+            return {
+                "ok": True,
+                "bill_id": bill_id,
+                "amount": float(amount) if amount is not None else float(curr.get("amount", 0)),
+                "vendor_id": vendor_id,
+                "due_date": payload["dueDate"],
+                "bill_date": payload["billDate"],
+                "note": payload["note"],
+                "status": "OPEN" if payload["open"] else "DRAFT",
+                "message": f"Successfully updated bill #{bill_id} in Bigcapital.",
+            }
+        return {"ok": False, "error": res.get("error")}
+
+    async def manage_vendors(
+        self,
+        action: str = "list",
+        vendor_id: Optional[int] = None,
+        name: Optional[str] = None,
+        email: Optional[str] = None,
+        phone: Optional[str] = None,
+        note: Optional[str] = None,
+        company_name: Optional[str] = None,
+        website: Optional[str] = None,
+        address: Optional[str] = None,
+        city: Optional[str] = None,
+        state: Optional[str] = None,
+        postcode: Optional[str] = None,
+        query: Optional[str] = None,
+        limit: int = 50,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Manage Bigcapital vendors (list, get, create, update, delete)."""
+        act = (action or "list").strip().lower()
+
+        if act == "list":
+            params = {"page_size": limit}
+            if query or name:
+                params["filter"] = query or name
+            res = await self._request("GET", "/api/vendors", params=params)
+            if not res.get("ok"):
+                return {"ok": False, "error": res.get("error")}
+            vendors = res.get("data", {}).get("data", [])
+            return {"ok": True, "total": len(vendors), "vendors": vendors}
+
+        elif act in ("get", "read"):
+            if not vendor_id:
+                if name:
+                    existing = await self.list_vendors(query=name)
+                    if existing:
+                        vendor_id = existing[0]["id"]
+            if not vendor_id:
+                return {"ok": False, "error": "vendor_id or valid name is required."}
+            res = await self._request("GET", f"/api/vendors/{vendor_id}")
+            if not res.get("ok"):
+                return {"ok": False, "error": res.get("error")}
+            return {"ok": True, "vendor_id": vendor_id, "vendor": res.get("data", {})}
+
+        elif act in ("create", "add"):
+            clean_name = (name or company_name or "").strip()
+            if not clean_name:
+                return {"ok": False, "error": "Vendor name is required."}
+            payload = {
+                "displayName": clean_name,
+                "companyName": company_name or clean_name,
+                "currencyCode": "USD",
+                "active": True,
+            }
+            if email:
+                payload["email"] = email.strip()
+            if phone:
+                payload["workPhone"] = phone.strip()
+            if note:
+                payload["note"] = note.strip()
+            if website:
+                payload["website"] = website.strip()
+            if address:
+                payload["billingAddress1"] = address.strip()
+            if city:
+                payload["billingAddressCity"] = city.strip()
+            if state:
+                payload["billingAddressState"] = state.strip()
+            if postcode:
+                payload["billingAddressPostcode"] = postcode.strip()
+
+            for k, v in kwargs.items():
+                if v is not None:
+                    payload[_snake_to_camel(k)] = v
+
+            res = await self._request("POST", "/api/vendors", payload=payload)
+            if res.get("ok"):
+                new_id = res.get("data", {}).get("id")
+                return {
+                    "ok": True,
+                    "vendor_id": new_id,
+                    "name": clean_name,
+                    "message": f"Successfully created vendor '{clean_name}' (ID: {new_id}).",
+                }
+            return {"ok": False, "error": res.get("error")}
+
+        elif act in ("update", "edit", "patch"):
+            if not vendor_id and name:
+                existing = await self.list_vendors(query=name)
+                if existing:
+                    vendor_id = existing[0]["id"]
+            if not vendor_id:
+                return {"ok": False, "error": "vendor_id is required to update vendor."}
+
+            curr_res = await self._request("GET", f"/api/vendors/{vendor_id}")
+            if not curr_res.get("ok"):
+                return {"ok": False, "error": f"Vendor #{vendor_id} not found: {curr_res.get('error')}"}
+            curr = curr_res.get("data", {})
+
+            clean_name = (name or curr.get("display_name") or curr.get("displayName") or "").strip()
+            payload = {
+                "displayName": clean_name,
+                "companyName": company_name or curr.get("company_name") or curr.get("companyName") or clean_name,
+                "currencyCode": "USD",
+                "active": True,
+            }
+            if email is not None:
+                payload["email"] = email.strip()
+            elif curr.get("email"):
+                payload["email"] = curr["email"]
+
+            if phone is not None:
+                payload["workPhone"] = phone.strip()
+            elif curr.get("work_phone") or curr.get("workPhone"):
+                payload["workPhone"] = curr.get("work_phone") or curr.get("workPhone")
+
+            if note is not None:
+                payload["note"] = note.strip()
+            elif curr.get("note"):
+                payload["note"] = curr["note"]
+
+            if website is not None:
+                payload["website"] = website.strip()
+            elif curr.get("website"):
+                payload["website"] = curr["website"]
+
+            if address is not None:
+                payload["billingAddress1"] = address.strip()
+            if city is not None:
+                payload["billingAddressCity"] = city.strip()
+            if state is not None:
+                payload["billingAddressState"] = state.strip()
+            if postcode is not None:
+                payload["billingAddressPostcode"] = postcode.strip()
+
+            for k, v in kwargs.items():
+                if v is not None:
+                    payload[_snake_to_camel(k)] = v
+
+            res = await self._request("PUT", f"/api/vendors/{vendor_id}", payload=payload)
+            if res.get("ok"):
+                return {
+                    "ok": True,
+                    "vendor_id": vendor_id,
+                    "name": clean_name,
+                    "updated_fields": list(payload.keys()),
+                    "message": f"Successfully updated vendor '{clean_name}' (ID: {vendor_id}).",
+                }
+            return {"ok": False, "error": res.get("error")}
+
+        elif act in ("delete", "remove"):
+            if not vendor_id and name:
+                existing = await self.list_vendors(query=name)
+                if existing:
+                    vendor_id = existing[0]["id"]
+            if not vendor_id:
+                return {"ok": False, "error": "vendor_id is required to delete vendor."}
+            res = await self._request("DELETE", f"/api/vendors/{vendor_id}")
+            if res.get("ok"):
+                return {
+                    "ok": True,
+                    "vendor_id": vendor_id,
+                    "message": f"Successfully deleted vendor #{vendor_id}.",
+                }
+            return {"ok": False, "error": res.get("error")}
+
+        return {"ok": False, "error": f"Unsupported vendor action '{act}'."}
+
+    async def manage_bill_payments(
+        self,
+        action: str = "list",
+        payment_id: Optional[int] = None,
+        bill_id: Optional[int] = None,
+        limit: int = 20,
+    ) -> Dict[str, Any]:
+        """Manage Bigcapital bill payments (list, get, delete)."""
+        act = (action or "list").strip().lower()
+
+        if act == "list":
+            params = {"page_size": limit}
+            res = await self._request("GET", "/api/bill-payments", params=params)
+            if not res.get("ok"):
+                return {"ok": False, "error": res.get("error")}
+            payments = res.get("data", {}).get("data", [])
+            return {"ok": True, "total": len(payments), "payments": payments}
+
+        elif act in ("get", "read"):
+            if not payment_id:
+                return {"ok": False, "error": "payment_id is required."}
+            res = await self._request("GET", f"/api/bill-payments/{payment_id}")
+            if not res.get("ok"):
+                return {"ok": False, "error": res.get("error")}
+            return {"ok": True, "payment_id": payment_id, "payment": res.get("data", {})}
+
+        elif act in ("delete", "void"):
+            if not payment_id:
+                return {"ok": False, "error": "payment_id is required to void/delete payment."}
+            res = await self._request("DELETE", f"/api/bill-payments/{payment_id}")
+            if res.get("ok"):
+                return {"ok": True, "payment_id": payment_id, "message": f"Successfully deleted bill payment #{payment_id}."}
+            return {"ok": False, "error": res.get("error")}
+
+        return {"ok": False, "error": f"Unsupported bill payment action '{act}'."}
+
+    async def entity_operation(
+        self,
+        entity: str,
+        action: str = "list",
+        id: Optional[Any] = None,
+        data: Optional[Dict[str, Any]] = None,
+        filter: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Universal dynamic CRUD gateway for Bigcapital REST API."""
+        raw_entity = (entity or "bills").strip().lower()
+        entity_map = {
+            "bill": "bills",
+            "bills": "bills",
+            "vendor": "vendors",
+            "vendors": "vendors",
+            "payment": "bill-payments",
+            "payments": "bill-payments",
+            "bill_payment": "bill-payments",
+            "bill_payments": "bill-payments",
+            "bill-payment": "bill-payments",
+            "bill-payments": "bill-payments",
+            "account": "accounts",
+            "accounts": "accounts",
+            "item": "items",
+            "items": "items",
+            "customer": "customers",
+            "customers": "customers",
+            "invoice": "sale-invoices",
+            "invoices": "sale-invoices",
+            "sale_invoice": "sale-invoices",
+            "sale_invoices": "sale-invoices",
+            "expense": "expenses",
+            "expenses": "expenses",
+        }
+        endpoint_entity = entity_map.get(raw_entity, raw_entity)
+        act = (action or "list").strip().lower()
+
+        # Normalize data dict if provided
+        normalized_data: Dict[str, Any] = {}
+        if isinstance(data, dict):
+            for k, v in data.items():
+                camel_k = _snake_to_camel(k)
+                normalized_data[camel_k] = v
+
+        if act in ("get", "read"):
+            if id:
+                res = await self._request("GET", f"/api/{endpoint_entity}/{id}")
+                return {
+                    "ok": res.get("ok", False),
+                    "entity": endpoint_entity,
+                    "action": "get",
+                    "id": id,
+                    "data": res.get("data", {}),
+                    "error": res.get("error"),
+                    "message": f"Retrieved {endpoint_entity} #{id}.",
+                }
+            else:
+                params = {"page_size": 50}
+                if filter:
+                    params["filter"] = filter
+                res = await self._request("GET", f"/api/{endpoint_entity}", params=params)
+                return {
+                    "ok": res.get("ok", False),
+                    "entity": endpoint_entity,
+                    "action": "list",
+                    "data": res.get("data", {}),
+                    "error": res.get("error"),
+                    "message": f"Listed {endpoint_entity} records.",
+                }
+
+        elif act in ("list", "search"):
+            params = {"page_size": 50}
+            if filter:
+                params["filter"] = filter
+            res = await self._request("GET", f"/api/{endpoint_entity}", params=params)
+            return {
+                "ok": res.get("ok", False),
+                "entity": endpoint_entity,
+                "action": "list",
+                "data": res.get("data", {}),
+                "error": res.get("error"),
+                "message": f"Listed {endpoint_entity} records.",
+            }
+
+        elif act in ("create", "post", "add"):
+            res = await self._request("POST", f"/api/{endpoint_entity}", payload=normalized_data)
+            created_data = res.get("data", {})
+            created_id = created_data.get("id") if isinstance(created_data, dict) else None
+            return {
+                "ok": res.get("ok", False),
+                "entity": endpoint_entity,
+                "action": "create",
+                "id": created_id,
+                "data": created_data,
+                "error": res.get("error"),
+                "message": f"Created {endpoint_entity} record (ID: {created_id}).",
+            }
+
+        elif act in ("update", "put", "edit"):
+            if not id:
+                return {"ok": False, "error": f"ID is required to update {endpoint_entity}."}
+            res = await self._request("PUT", f"/api/{endpoint_entity}/{id}", payload=normalized_data)
+            return {
+                "ok": res.get("ok", False),
+                "entity": endpoint_entity,
+                "action": "update",
+                "id": id,
+                "data": res.get("data", {}),
+                "error": res.get("error"),
+                "message": f"Updated {endpoint_entity} #{id}.",
+            }
+
+        elif act in ("delete", "remove"):
+            if not id:
+                return {"ok": False, "error": f"ID is required to delete {endpoint_entity}."}
+            res = await self._request("DELETE", f"/api/{endpoint_entity}/{id}")
+            return {
+                "ok": res.get("ok", False),
+                "entity": endpoint_entity,
+                "action": "delete",
+                "id": id,
+                "error": res.get("error"),
+                "message": f"Deleted {endpoint_entity} #{id}.",
+            }
+
+        return {"ok": False, "error": f"Unsupported action '{act}' for {endpoint_entity}."}
 
     # --------------------------------------------------------------------------
     # Bill Payments & Settlements

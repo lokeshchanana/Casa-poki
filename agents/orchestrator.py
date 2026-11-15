@@ -102,10 +102,13 @@ LIFECYCLE & DEAL RULES:
 You manage all financial accounting through Bigcapital hosted at https://finance.lokeshchanana.com.
 You have direct tools to:
 - Record incoming bills and invoices (`finance_record_bill`)
-- Settle and record bill payments (`finance_record_payment`)
+- Update existing bills, change due dates, amounts, notes, or categories (`finance_update_bill`)
+- Settle and record bill payments (`finance_record_payment`, `finance_manage_bill_payments`)
+- Manage vendors (list, inspect, create, update phone/email/address, delete) (`finance_manage_vendors`)
 - Audit bills, open balances, and due dates (`finance_list_bills`, `finance_dashboard`)
 - Ingest batches of historical bills and receipts (`finance_import_historical_bills`)
-Whenever the user or an incoming email/message presents a bill or payment, extract the vendor, amount, due date, category, and record it into Bigcapital.
+- Perform unconstrained dynamic CRUD operations on any Bigcapital entity (`finance_entity_operation`)
+Whenever the user or an incoming email/message presents a bill, payment, or vendor modification, extract the relevant fields and record or update it into Bigcapital.
 When asked about finances, summarize accounts payable, upcoming due bills, and provide the portal link https://finance.lokeshchanana.com.""",
     },
     "marketing": {
@@ -167,7 +170,7 @@ CORE CAPABILITIES & GUIDELINES:
 1. Tool Invocation & Delegation:
    - When the user asks to check, read, triage, or fetch incoming emails from lokesh@lokeshchanana.com, invoke `mailman_read_inbox` or delegate to Silas Drake ('mailman').
    - When Silas Drake presents emails, analyze each message and decide what needs to be done:
-     * Finance email (invoices, utility bills, receipts, payment notices) -> Delegate to Fiona Banks ('finance') or call `finance_record_bill` to record into Bigcapital.
+     * Finance email or task (invoices, utility bills, receipts, payment notices, vendor updates, bill edits) -> Delegate to Fiona Banks ('finance') or call finance tools directly (`finance_record_bill`, `finance_update_bill`, `finance_manage_vendors`, `finance_entity_operation`).
      * CRM related email (buyer/seller inquiries, new leads, client updates) -> Delegate to Miles Miller ('intake') or call `create_contact` / `manage_notes` in Twenty CRM.
      * CMA / valuation request -> Delegate to Carter Hayes ('cma') for MLS comps.
      * Marketing / post-close drip / promotional request -> Delegate to Maya Reyes ('marketing') or invoke `enroll_buyer_post_close` / `list_post_close_drips` / `process_post_close_drips`.
