@@ -114,6 +114,18 @@ TOOL_SCHEMAS = [
                         "type": "boolean",
                         "description": "True to only return contacts that have a non-empty email address.",
                     },
+                    "market": {
+                        "type": "string",
+                        "description": "Filter contacts by geographic market (e.g. South Seattle, Bellevue, Seattle, West Seattle).",
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Filter contacts by role (Buyer, Seller, Customer, Real estate agent, etc.).",
+                    },
+                    "lead_source": {
+                        "type": "string",
+                        "description": "Filter contacts by lead source (Website, Open House, Sphere, Referral, etc.).",
+                    },
                     "limit": {
                         "type": "integer",
                         "description": "Maximum number of contacts to return (default 50, use up to 500 for counts).",
@@ -141,7 +153,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "create_contact",
-            "description": "Create a new contact/lead in Twenty CRM directly. Requires at least a valid full name. Live service: only test with verified owner details.",
+            "description": "Create a new contact/lead in Twenty CRM directly. Supports standard contact details plus geographic market, lead source, and any custom attributes. Live service: only test with verified owner details.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -150,8 +162,19 @@ TOOL_SCHEMAS = [
                     "phone_number": {"type": "string", "description": "Phone number"},
                     "role": {
                         "type": "string",
-                        "description": "Role: Customer, Buyer, Seller, Real estate agent, etc.",
+                        "description": "Role: Customer, Buyer, Seller, Real estate agent, Vendor, Partner, etc.",
                     },
+                    "market": {
+                        "type": "string",
+                        "description": "Geographic real estate market (e.g. South Seattle, Bellevue, Seattle, West Seattle, Maple Valley, Tacoma)",
+                    },
+                    "lead_source": {
+                        "type": "string",
+                        "description": "Lead source (e.g. Website, Open House, Sphere, Referral, Zillow, Redfin)",
+                    },
+                    "job_title": {"type": "string", "description": "Job title or occupation"},
+                    "primary_property_address": {"type": "string", "description": "Primary property or interested address"},
+                    "notes": {"type": "string", "description": "Optional notes to attach to the new contact"},
                 },
                 "required": ["name"],
             },
@@ -161,13 +184,13 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "update_contact",
-            "description": "Update an existing contact in Twenty CRM directly. Requires either contact_id or target_name to identify the contact, plus at least one field to change.",
+            "description": "Update an existing contact in Twenty CRM directly. Requires either contact_id or target_name, and dynamically forwards any updated fields (market, lead_source, role, job_title, address, notes, lifecycle_stage, phone, email, etc.) to Twenty CRM.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "contact_id": {
                         "type": "string",
-                        "description": "Twenty CRM contact UUID (e.g. 0001f8ad-6f16-4074-9329-1b6c31a860c6)",
+                        "description": "Twenty CRM contact UUID (e.g. 21ec12cb-3cc7-4b96-be16-e0a21f4e0d87)",
                     },
                     "target_name": {
                         "type": "string",
@@ -183,8 +206,70 @@ TOOL_SCHEMAS = [
                         "type": "string",
                         "description": "'True' or 'False' to update email permission",
                     },
+                    "market": {
+                        "type": "string",
+                        "description": "Geographic market (e.g. South Seattle, Bellevue, Seattle, Maple Valley, Tacoma)",
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Role: Customer, Buyer, Seller, Real estate agent, Vendor, Partner, etc.",
+                    },
+                    "lead_source": {
+                        "type": "string",
+                        "description": "Lead source (e.g. Website, Open House, Sphere, Referral)",
+                    },
+                    "job_title": {
+                        "type": "string",
+                        "description": "Professional occupation or title",
+                    },
+                    "lifecycle_stage": {
+                        "type": "string",
+                        "description": "Client lifecycle stage: Lead, Engaged, Active Client, Pending, Past Client",
+                    },
+                    "primary_property_address": {
+                        "type": "string",
+                        "description": "Current or target property address",
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Note content to attach to the contact",
+                    },
                 },
                 "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "crm_entity_operation",
+            "description": "Universal dynamic CRUD gateway for Twenty CRM. Performs direct operations (get, list, create, update, delete) on any Twenty CRM entity (people, opportunities, tasks, notes, noteTargets, taskTargets, companies) with arbitrary payload fields.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity": {
+                        "type": "string",
+                        "description": "The Twenty CRM entity collection to operate on (e.g. 'people', 'opportunities', 'tasks', 'notes', 'companies', 'noteTargets', 'taskTargets').",
+                    },
+                    "action": {
+                        "type": "string",
+                        "enum": ["get", "list", "create", "update", "delete"],
+                        "description": "CRUD action to execute.",
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Entity UUID (required for get, update, delete).",
+                    },
+                    "data": {
+                        "type": "object",
+                        "description": "Key-value attributes to create or update on the entity.",
+                    },
+                    "filter": {
+                        "type": "string",
+                        "description": "Optional URL query string or filter for list/get operations (e.g. 'limit=20&order=createdAt:desc').",
+                    },
+                },
+                "required": ["entity", "action"],
             },
         },
     },
@@ -548,6 +633,14 @@ TOOL_SCHEMAS = [
 # Direct Twenty CRM Execution Handlers
 # =============================================================================
 
+def _snake_to_camel(s: str) -> str:
+    """Converts snake_case string to camelCase. Leaves camelCase or single words unchanged."""
+    if "_" not in s:
+        return s
+    parts = s.split("_")
+    return parts[0] + "".join(x.capitalize() for x in parts[1:])
+
+
 async def _direct_search_contacts(args: Dict[str, Any]) -> Dict[str, Any]:
     query = (args.get("query") or "all").strip().lower()
     limit = args.get("limit") or (500 if args.get("count_mode") else 50)
@@ -575,6 +668,9 @@ async def _direct_search_contacts(args: Dict[str, Any]) -> Dict[str, Any]:
             "can_email": can_email_val,
             "lead_source": p.get("leadSource") or "",
             "market": p.get("market") or "",
+            "job_title": p.get("jobTitle") or "",
+            "lifecycle_stage": p.get("lifecycleStage") or "",
+            "address": p.get("primaryPropertyAddress") or "",
             "created_at": p.get("createdAt") or "",
             "created_date": (p.get("createdAt") or "")[:10],
             "updated_at": p.get("updatedAt") or "",
@@ -615,6 +711,7 @@ async def _direct_search_contacts(args: Dict[str, Any]) -> Dict[str, Any]:
             or query in c["phone"].lower()
             or query in c["market"].lower()
             or query in c["lead_source"].lower()
+            or query in c["job_title"].lower()
         ]
         
     # Structured criteria filtering
@@ -627,6 +724,18 @@ async def _direct_search_contacts(args: Dict[str, Any]) -> Dict[str, Any]:
         
     if args.get("email_present"):
         mapped_contacts = [c for c in mapped_contacts if c["email"] and c["email"].strip() not in ("", "N/A", "None")]
+
+    if args.get("market"):
+        m_target = str(args["market"]).strip().lower()
+        mapped_contacts = [c for c in mapped_contacts if m_target in (c.get("market") or "").lower()]
+
+    if args.get("role"):
+        r_target = str(args["role"]).strip().lower()
+        mapped_contacts = [c for c in mapped_contacts if r_target in (c.get("role") or "").lower()]
+
+    if args.get("lead_source"):
+        ls_target = str(args["lead_source"]).strip().lower()
+        mapped_contacts = [c for c in mapped_contacts if ls_target in (c.get("lead_source") or "").lower()]
 
     total_found = len(mapped_contacts)
     sliced = mapped_contacts[:limit]
@@ -641,52 +750,87 @@ async def _direct_search_contacts(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def _direct_create_contact(args: Dict[str, Any]) -> Dict[str, Any]:
-    full_name = (args.get("name") or "").strip()
-    if not full_name and not args.get("email") and not args.get("phone_number"):
+    full_name = (args.get("name") or args.get("full_name") or "").strip()
+    email_val = (args.get("email") or args.get("primary_email") or "").strip()
+    phone_val = str(args.get("phone_number") or args.get("phone") or "").strip()
+    
+    if not full_name and not email_val and not phone_val:
         return {"ok": False, "tool": "create_contact", "error": "Name, email, or phone is required."}
         
-    name_parts = full_name.split(" ", 1)
+    name_parts = full_name.split(" ", 1) if full_name else []
     first_name = name_parts[0] if name_parts else "New"
     last_name = name_parts[1] if len(name_parts) > 1 else "Lead"
     
     payload: Dict[str, Any] = {
         "name": {"firstName": first_name, "lastName": last_name},
-        "leadSource": "AI Agent",
-        "contactRole": args.get("role", "Customer"),
-        "canEmail": True,
+        "leadSource": args.get("lead_source") or args.get("leadSource") or "AI Agent",
+        "contactRole": args.get("role") or args.get("contactRole") or "Customer",
+        "canEmail": True if args.get("can_email") is None else (str(args.get("can_email")).lower() in ("true", "1", "yes")),
     }
-    if args.get("email"):
-        payload["emails"] = {"primaryEmail": args["email"].strip()}
-    if args.get("phone_number"):
-        digits = re.sub(r"[^0-9]", "", str(args["phone_number"]))
-        if len(digits) == 10:
-            payload["phones"] = {
-                "primaryPhoneCallingCode": "+1",
-                "primaryPhoneCountryCode": "US",
-                "primaryPhoneNumber": digits,
-            }
-        elif len(digits) == 11 and digits.startswith("1"):
-            payload["phones"] = {
-                "primaryPhoneCallingCode": "+1",
-                "primaryPhoneCountryCode": "US",
-                "primaryPhoneNumber": digits[1:],
-            }
-        else:
-            payload["phones"] = {
-                "primaryPhoneCallingCode": "+1",
-                "primaryPhoneCountryCode": "US",
-                "primaryPhoneNumber": digits,
-            }
+    if email_val:
+        payload["emails"] = {"primaryEmail": email_val}
+    if phone_val:
+        digits = re.sub(r"[^0-9]", "", phone_val)
+        clean_digits = digits[1:] if len(digits) == 11 and digits.startswith("1") else digits
+        payload["phones"] = {
+            "primaryPhoneCallingCode": "+1",
+            "primaryPhoneCountryCode": "US",
+            "primaryPhoneNumber": clean_digits,
+        }
         
+    alias_map = {
+        "role": "contactRole",
+        "contact_role": "contactRole",
+        "source": "leadSource",
+        "lead_source": "leadSource",
+        "market": "market",
+        "job_title": "jobTitle",
+        "address": "primaryPropertyAddress",
+        "property_address": "primaryPropertyAddress",
+        "primary_property_address": "primaryPropertyAddress",
+        "partner_name": "partnerName",
+        "lifecycle_stage": "lifecycleStage",
+        "past_client_type": "pastClientType",
+    }
+    for a_key, camel in alias_map.items():
+        if args.get(a_key) is not None:
+            payload[camel] = str(args[a_key]).strip()
+            
+    # Dynamic passthrough for any other fields
+    excluded = {
+        "name", "full_name", "first_name", "last_name",
+        "email", "primary_email", "phone", "phone_number",
+        "can_email", "tool", "direct", "sessionId", "session_id", "notes", "note"
+    } | set(alias_map.keys())
+    for k, v in args.items():
+        if k not in excluded and v is not None:
+            camel_k = _snake_to_camel(k)
+            payload[camel_k] = v
+            
     res = await crm_post("/rest/people", payload)
     new_person = res.get("data", {}).get("createPerson", {})
+    new_id = new_person.get("id")
+    
+    note_content = args.get("notes") or args.get("note")
+    if note_content and new_id:
+        try:
+            await _direct_manage_notes({
+                "action": "create",
+                "contact_id": new_id,
+                "title": "Initial Contact Note",
+                "content": str(note_content),
+            })
+        except Exception as ne:
+            logger.warning(f"Could not attach note to new contact {new_id}: {ne}")
+
     return {
         "ok": True,
         "tool": "create_contact",
         "direct": True,
-        "id": new_person.get("id"),
-        "name": full_name,
+        "id": new_id,
+        "name": full_name or f"{first_name} {last_name}",
         "contact": new_person,
+        "fields_created": list(payload.keys()),
         "message": "Contact created successfully in Twenty CRM.",
     }
 
@@ -706,55 +850,83 @@ async def _direct_update_contact(args: Dict[str, Any]) -> Dict[str, Any]:
         target_id = contacts[0]["id"]
         
     update_payload: Dict[str, Any] = {}
-    new_name = (args.get("name") or args.get("new_name") or "").strip()
+    new_name = (args.get("name") or args.get("new_name") or args.get("full_name") or "").strip()
     if new_name:
         parts = new_name.split(" ", 1)
         update_payload["name"] = {
             "firstName": parts[0],
             "lastName": parts[1] if len(parts) > 1 else "",
         }
-    if args.get("phone_number"):
-        digits = re.sub(r"[^0-9]", "", str(args["phone_number"]))
+    elif args.get("first_name") or args.get("last_name"):
+        name_obj: Dict[str, str] = {}
+        if args.get("first_name"):
+            name_obj["firstName"] = str(args["first_name"]).strip()
+        if args.get("last_name"):
+            name_obj["lastName"] = str(args["last_name"]).strip()
+        update_payload["name"] = name_obj
+
+    phone_val = args.get("phone_number") or args.get("phone")
+    if phone_val:
+        digits = re.sub(r"[^0-9]", "", str(phone_val))
         clean_digits = digits[1:] if len(digits) == 11 and digits.startswith("1") else digits
         update_payload["phones"] = {
             "primaryPhoneCallingCode": "+1",
             "primaryPhoneCountryCode": "US",
             "primaryPhoneNumber": clean_digits,
         }
-    if args.get("email"):
-        update_payload["emails"] = {"primaryEmail": args["email"].strip()}
-    if args.get("can_email") is not None:
-        can_bool = str(args["can_email"]).lower() in ("true", "1", "yes")
-        update_payload["canEmail"] = can_bool
 
-    # Real Estate Lifecycle & Representation Fields
-    if args.get("role"):
-        update_payload["contactRole"] = args["role"].strip()
-    if args.get("partner_name"):
-        update_payload["partnerName"] = args["partner_name"].strip()
-    if args.get("primary_property_address"):
-        update_payload["primaryPropertyAddress"] = args["primary_property_address"].strip()
-    if args.get("search_active") is not None:
-        update_payload["searchActive"] = str(args["search_active"]).lower() in ("true", "1", "yes")
-    if args.get("portal_active") is not None:
-        update_payload["portalActive"] = str(args["portal_active"]).lower() in ("true", "1", "yes")
-    if args.get("last_portal_activity_at"):
-        update_payload["lastPortalActivityAt"] = args["last_portal_activity_at"]
-    if args.get("bba_signed") is not None:
-        update_payload["bbaSigned"] = str(args["bba_signed"]).lower() in ("true", "1", "yes")
-    if args.get("bba_signed_date"):
-        update_payload["bbaSignedDate"] = args["bba_signed_date"]
-    if args.get("bba_expiration_date"):
-        update_payload["bbaExpirationDate"] = args["bba_expiration_date"]
-    if args.get("past_client_type"):
-        update_payload["pastClientType"] = args["past_client_type"].strip()
-    if args.get("home_maintenance_tips") is not None:
-        update_payload["homeMaintenanceTips"] = str(args["home_maintenance_tips"]).lower() in ("true", "1", "yes")
+    email_val = args.get("email") or args.get("primary_email")
+    if email_val:
+        update_payload["emails"] = {"primaryEmail": str(email_val).strip()}
+
+    boolean_fields = {
+        "can_email": "canEmail",
+        "search_active": "searchActive",
+        "portal_active": "portalActive",
+        "bba_signed": "bbaSigned",
+        "home_maintenance_tips": "homeMaintenanceTips",
+    }
+    for b_key, camel in boolean_fields.items():
+        if args.get(b_key) is not None:
+            update_payload[camel] = str(args[b_key]).lower() in ("true", "1", "yes")
+
+    alias_map = {
+        "role": "contactRole",
+        "contact_role": "contactRole",
+        "source": "leadSource",
+        "lead_source": "leadSource",
+        "market": "market",
+        "job_title": "jobTitle",
+        "partner_name": "partnerName",
+        "address": "primaryPropertyAddress",
+        "property_address": "primaryPropertyAddress",
+        "primary_property_address": "primaryPropertyAddress",
+        "bba_signed_date": "bbaSignedDate",
+        "bba_expiration_date": "bbaExpirationDate",
+        "last_portal_activity_at": "lastPortalActivityAt",
+        "past_client_type": "pastClientType",
+    }
+    for a_key, camel in alias_map.items():
+        if args.get(a_key) is not None:
+            update_payload[camel] = str(args[a_key]).strip()
+
+    # Dynamic notes attachment
+    note_content = args.get("notes") or args.get("note")
+    if note_content and target_id:
+        try:
+            await _direct_manage_notes({
+                "action": "create",
+                "contact_id": target_id,
+                "title": "Contact Note",
+                "content": str(note_content),
+            })
+        except Exception as ne:
+            logger.warning(f"Could not automatically attach note to contact {target_id}: {ne}")
 
     # Lifecycle Stage with Regression Guardrails
-    new_stage = args.get("lifecycle_stage")
+    new_stage = args.get("lifecycle_stage") or args.get("lifecycleStage")
     if new_stage:
-        clean_new = new_stage.strip()
+        clean_new = str(new_stage).strip()
         stage_hierarchy = {
             "lead": 1,
             "engaged": 2,
@@ -782,11 +954,37 @@ async def _direct_update_contact(args: Dict[str, Any]) -> Dict[str, Any]:
                 update_payload["lifecycleStage"] = clean_new
         else:
             update_payload["lifecycleStage"] = clean_new
-        
+
+    # Dynamic Passthrough for any other unhandled keys
+    metadata_keys = {
+        "contact_id", "target_name", "force_stage_update", "tool", "action",
+        "direct", "sessionId", "session_id", "notes", "note",
+        "name", "new_name", "full_name", "first_name", "last_name",
+        "phone", "phone_number", "phoneNumber", "email", "primary_email",
+        "lifecycle_stage", "lifecycleStage",
+    }
+    excluded_keys = metadata_keys | set(boolean_fields.keys()) | set(alias_map.keys())
+    for k, v in args.items():
+        if k not in excluded_keys and v is not None:
+            camel_k = _snake_to_camel(k)
+            update_payload[camel_k] = v
+
     if not update_payload:
+        if note_content:
+            return {
+                "ok": True,
+                "tool": "update_contact",
+                "direct": True,
+                "updated_id": target_id,
+                "name": new_name or target_name,
+                "fields_updated": ["notes"],
+                "updated_values": {"notes": note_content},
+                "message": f"Note attached to contact '{new_name or target_name}' successfully.",
+            }
         return {"ok": False, "tool": "update_contact", "error": "No fields specified to update."}
         
     await crm_patch(f"/rest/people/{target_id}", update_payload)
+    display_name = new_name or target_name or target_id
     return {
         "ok": True,
         "tool": "update_contact",
@@ -794,7 +992,8 @@ async def _direct_update_contact(args: Dict[str, Any]) -> Dict[str, Any]:
         "updated_id": target_id,
         "name": new_name or target_name,
         "fields_updated": list(update_payload.keys()),
-        "message": f"Contact '{new_name or target_name}' updated successfully in Twenty CRM.",
+        "updated_values": update_payload,
+        "message": f"Contact '{display_name}' updated successfully in Twenty CRM.",
     }
 
 
@@ -1162,6 +1361,152 @@ async def _direct_manage_opportunities(args: Dict[str, Any]) -> Dict[str, Any]:
         "total": len(mapped_opps),
         "opportunities": mapped_opps,
     }
+
+
+async def _direct_crm_entity_operation(args: Dict[str, Any]) -> Dict[str, Any]:
+    raw_entity = (args.get("entity") or "people").strip()
+    entity_map = {
+        "person": "people",
+        "people": "people",
+        "contact": "people",
+        "contacts": "people",
+        "opportunity": "opportunities",
+        "opportunities": "opportunities",
+        "deal": "opportunities",
+        "deals": "opportunities",
+        "task": "tasks",
+        "tasks": "tasks",
+        "note": "notes",
+        "notes": "notes",
+        "company": "companies",
+        "companies": "companies",
+        "notetarget": "noteTargets",
+        "notetargets": "noteTargets",
+        "note_target": "noteTargets",
+        "note_targets": "noteTargets",
+        "tasktarget": "taskTargets",
+        "tasktargets": "taskTargets",
+        "task_target": "taskTargets",
+        "task_targets": "taskTargets",
+    }
+    entity = entity_map.get(raw_entity.lower(), raw_entity)
+    action = (args.get("action") or "list").strip().lower()
+    entity_id = args.get("id") or args.get("entity_id")
+    data = args.get("data") or {}
+    filter_val = args.get("filter") or args.get("query_params")
+
+    # Normalize data dictionary keys
+    normalized_data: Dict[str, Any] = {}
+    if isinstance(data, dict):
+        for k, v in data.items():
+            if k in ("name", "full_name") and entity == "people" and isinstance(v, str):
+                parts = v.strip().split(" ", 1)
+                normalized_data["name"] = {"firstName": parts[0], "lastName": parts[1] if len(parts) > 1 else ""}
+            elif k in ("phone", "phone_number") and entity == "people" and isinstance(v, str):
+                digits = re.sub(r"[^0-9]", "", v)
+                clean_digits = digits[1:] if len(digits) == 11 and digits.startswith("1") else digits
+                normalized_data["phones"] = {
+                    "primaryPhoneCallingCode": "+1",
+                    "primaryPhoneCountryCode": "US",
+                    "primaryPhoneNumber": clean_digits,
+                }
+            elif k in ("email", "primary_email") and entity == "people" and isinstance(v, str):
+                normalized_data["emails"] = {"primaryEmail": v.strip()}
+            elif k == "role" and entity == "people":
+                normalized_data["contactRole"] = v
+            else:
+                camel_k = _snake_to_camel(k)
+                normalized_data[camel_k] = v
+
+    if action in ("get", "read", "find"):
+        if entity_id:
+            res = await crm_get(f"/rest/{entity}/{entity_id}")
+            entity_data = res.get("data", {})
+            return {
+                "ok": True,
+                "tool": "crm_entity_operation",
+                "entity": entity,
+                "action": "get",
+                "id": entity_id,
+                "data": entity_data,
+                "message": f"Successfully retrieved {entity} record {entity_id}.",
+            }
+        else:
+            query_str = f"?{filter_val}" if filter_val else "?limit=50&order=createdAt:desc"
+            res = await crm_get(f"/rest/{entity}{query_str}")
+            return {
+                "ok": True,
+                "tool": "crm_entity_operation",
+                "entity": entity,
+                "action": "list",
+                "data": res.get("data", {}),
+                "message": f"Successfully listed {entity} records.",
+            }
+
+    elif action in ("list", "search"):
+        query_str = f"?{filter_val}" if filter_val else "?limit=50&order=createdAt:desc"
+        res = await crm_get(f"/rest/{entity}{query_str}")
+        return {
+            "ok": True,
+            "tool": "crm_entity_operation",
+            "entity": entity,
+            "action": "list",
+            "data": res.get("data", {}),
+            "message": f"Successfully listed {entity} records.",
+        }
+
+    elif action in ("create", "insert", "post"):
+        if not normalized_data:
+            return {"ok": False, "tool": "crm_entity_operation", "error": f"No data provided to create {entity}."}
+        res = await crm_post(f"/rest/{entity}", normalized_data)
+        created_data = res.get("data", {})
+        created_id = None
+        for val in created_data.values():
+            if isinstance(val, dict) and "id" in val:
+                created_id = val["id"]
+                break
+        return {
+            "ok": True,
+            "tool": "crm_entity_operation",
+            "entity": entity,
+            "action": "create",
+            "id": created_id,
+            "data": created_data,
+            "message": f"Successfully created {entity} record (ID: {created_id}).",
+        }
+
+    elif action in ("update", "patch", "modify"):
+        if not entity_id:
+            return {"ok": False, "tool": "crm_entity_operation", "error": f"Entity ID is required to update {entity}."}
+        if not normalized_data:
+            return {"ok": False, "tool": "crm_entity_operation", "error": f"No fields provided to update {entity}."}
+        res = await crm_patch(f"/rest/{entity}/{entity_id}", normalized_data)
+        return {
+            "ok": True,
+            "tool": "crm_entity_operation",
+            "entity": entity,
+            "action": "update",
+            "id": entity_id,
+            "updated_fields": list(normalized_data.keys()),
+            "data": res.get("data", {}),
+            "message": f"Successfully updated {entity} record {entity_id}.",
+        }
+
+    elif action in ("delete", "remove"):
+        if not entity_id:
+            return {"ok": False, "tool": "crm_entity_operation", "error": f"Entity ID is required to delete {entity}."}
+        res = await crm_delete(f"/rest/{entity}/{entity_id}")
+        return {
+            "ok": True,
+            "tool": "crm_entity_operation",
+            "entity": entity,
+            "action": "delete",
+            "id": entity_id,
+            "message": f"Successfully deleted {entity} record {entity_id}.",
+        }
+
+    else:
+        return {"ok": False, "tool": "crm_entity_operation", "error": f"Unsupported action '{action}' for entity '{entity}'."}
 
 
 # =============================================================================
@@ -1753,6 +2098,12 @@ async def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             res["raw_payload_sent"] = args
             return res
 
+        elif name == "crm_entity_operation":
+            res = await _direct_crm_entity_operation(args)
+            res["duration_ms"] = int((time.time() - start_ts) * 1000)
+            res["raw_payload_sent"] = args
+            return res
+
         elif name == "enroll_buyer_post_close":
             res = await _direct_enroll_buyer_post_close(args)
             res["duration_ms"] = int((time.time() - start_ts) * 1000)
@@ -1872,13 +2223,37 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
         contact_name = result.get("name") or args.get("name") or args.get("new_name") or args.get("target_name")
         contact_id = result.get("updated_id") or args.get("contact_id")
         fields_updated = result.get("fields_updated") or []
-        fields_line = f"- **Updated Fields:** `{', '.join(fields_updated)}`\n" if fields_updated else ""
+        updated_values = result.get("updated_values") or {}
+
+        detail_lines = []
+        for k, v in updated_values.items():
+            if isinstance(v, dict):
+                v_str = ", ".join(f"{sub_k}: {sub_v}" for sub_k, sub_v in v.items() if sub_v)
+            else:
+                v_str = str(v)
+            detail_lines.append(f"  - **{k}:** `{v_str}`")
+
+        details_block = ("\n" + "\n".join(detail_lines)) if detail_lines else ""
+        fields_line = f"- **Updated Fields:** `{', '.join(fields_updated)}`{details_block}\n" if fields_updated else ""
         name_line = f"- **Contact:** **{contact_name}** (ID: `{contact_id}`)\n" if contact_name else f"- **Contact ID:** `{contact_id}`\n"
         return (
             f"### Contact Updated in Twenty CRM (Direct REST)\n"
             f"{name_line}"
             f"{fields_line}"
             f"- **Status:** {result.get('message', 'Updated successfully')}"
+        )
+
+    if tool_name == "crm_entity_operation":
+        action = (result.get("action") or args.get("action") or "operation").upper()
+        entity = result.get("entity") or args.get("entity") or "record"
+        res_id = result.get("id") or args.get("id") or ""
+        id_str = f" (ID: `{res_id}`)" if res_id else ""
+        updated_fields = result.get("updated_fields") or []
+        fields_line = f"- **Fields Affected:** `{', '.join(updated_fields)}`\n" if updated_fields else ""
+        return (
+            f"### Twenty CRM Operation: {action} `{entity}`{id_str}\n"
+            f"{fields_line}"
+            f"- **Status:** {result.get('message', 'Operation completed successfully.')}"
         )
 
     if tool_name == "delete_contact":

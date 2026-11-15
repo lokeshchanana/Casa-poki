@@ -898,6 +898,7 @@ async def run_multi_agent_pipeline(
                     "manage_notes",
                     "manage_tasks",
                     "manage_opportunities",
+                    "crm_entity_operation",
                 )
             ]
 
