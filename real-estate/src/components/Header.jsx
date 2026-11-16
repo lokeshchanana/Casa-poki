@@ -19,7 +19,7 @@ export default function Header() {
   }, []);
 
   return (
-    <header className={"fixed w-full top-0 z-50 transition-all duration-500 " + (isScrolled ? "bg-white/95 dark:bg-charcoal-dark/95 backdrop-blur-md border-b border-silver/20 py-1" : "bg-transparent border-transparent py-3")}>
+    <header className={"fixed w-full top-0 z-50 transition-all duration-500 backdrop-blur-md border-b border-silver/20 " + (isScrolled ? "bg-white/95 dark:bg-charcoal-dark/95 py-1 shadow-sm" : "bg-ivory/85 dark:bg-charcoal/80 py-3")}>
       {/* Mobile Top Bar */}
       <div className="md:hidden bg-charcoal dark:bg-black text-ivory dark:text-silver text-xs py-2 px-4 flex justify-between items-center border-b border-silver/20">
         <a href="tel:8018601052" className="flex items-center gap-2"><Phone className="w-3 h-3"/> (801) 860-1052</a>
@@ -99,7 +99,7 @@ export default function Header() {
               onClick={toggleTheme}
               aria-label={`Switch to ${resolvedTheme === 'dark' ? 'light' : 'dark'} mode`}
               title={`Theme: ${theme === 'system' ? 'Device mode (' + resolvedTheme + ')' : resolvedTheme}. Click to toggle.`}
-              className="p-2 border border-silver/40 dark:border-silver/20 hover:border-charcoal dark:hover:border-silver hover:bg-black/5 dark:hover:bg-white/10 transition-colors text-charcoal dark:text-silver flex items-center justify-center rounded-sm"
+              className="p-2 bg-white/85 dark:bg-charcoal-dark/85 border border-charcoal/20 dark:border-silver/25 hover:border-charcoal dark:hover:border-silver hover:bg-white dark:hover:bg-charcoal transition-colors text-charcoal dark:text-silver flex items-center justify-center rounded-sm shadow-sm"
             >
               {resolvedTheme === 'dark' ? (
                 <Sun className="w-4 h-4 text-amber-400" />

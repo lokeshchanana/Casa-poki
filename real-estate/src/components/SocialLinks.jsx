@@ -110,7 +110,7 @@ export function SocialIconRow({ size = 'md', className = '' }) {
             rel="noopener noreferrer"
             aria-label={`${profile.name} - ${profile.label}`}
             title={`${profile.name}: ${profile.handle}`}
-            className={`border border-silver/40 dark:border-silver/20 rounded-md text-charcoal-light dark:text-silver-dark transition-all duration-200 ${sizeClasses} ${profile.hoverText} ${profile.hoverBg} ${profile.hoverBorder}`}
+            className={`bg-white/85 dark:bg-charcoal-dark/85 border border-charcoal/20 dark:border-silver/25 rounded-md text-charcoal dark:text-silver shadow-sm transition-all duration-200 ${sizeClasses} ${profile.hoverText} ${profile.hoverBg} ${profile.hoverBorder}`}
           >
             <IconComponent className={iconSizes} />
           </a>
