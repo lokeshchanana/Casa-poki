@@ -213,6 +213,25 @@ def init_store() -> None:
         """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS processed_email_bills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_id TEXT UNIQUE NOT NULL,
+            sender TEXT,
+            subject TEXT,
+            vendor_name TEXT,
+            amount REAL,
+            bill_date TEXT,
+            due_date TEXT,
+            bill_id INTEGER,
+            status TEXT NOT NULL,
+            details TEXT,
+            processed_at TEXT NOT NULL
+        )
+        """
+    )
+
     conn.commit()
     conn.close()
 
@@ -1225,6 +1244,86 @@ def delete_processed_drive_bill(file_id: str) -> bool:
     conn.commit()
     conn.close()
     return deleted
+
+
+def is_email_bill_processed(message_id: str) -> bool:
+    """Checks if an email bill/statement has already been processed into Bigcapital."""
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM processed_email_bills WHERE message_id = ?", (message_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row is not None
+
+
+def record_processed_email_bill(
+    message_id: str,
+    sender: str,
+    subject: str,
+    vendor_name: str,
+    amount: float,
+    bill_date: str,
+    due_date: Optional[str] = None,
+    bill_id: Optional[int] = None,
+    status: str = "PROCESSED",
+    details: Optional[str] = None,
+) -> int:
+    """Records or updates a processed email bill record in the local database."""
+    init_store()
+    now = datetime.utcnow().isoformat() + "Z"
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO processed_email_bills (message_id, sender, subject, vendor_name, amount, bill_date, due_date, bill_id, status, details, processed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(message_id) DO UPDATE SET
+            sender = excluded.sender,
+            subject = excluded.subject,
+            vendor_name = excluded.vendor_name,
+            amount = excluded.amount,
+            bill_date = excluded.bill_date,
+            due_date = excluded.due_date,
+            bill_id = excluded.bill_id,
+            status = excluded.status,
+            details = excluded.details,
+            processed_at = excluded.processed_at
+        """,
+        (message_id, sender, subject, vendor_name, amount, bill_date, due_date or bill_date, bill_id, status, details, now),
+    )
+    last_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return last_id
+
+
+def list_processed_email_bills(limit: int = 50) -> List[Dict[str, Any]]:
+    """Returns recent processed email bills from the database."""
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT * FROM processed_email_bills ORDER BY id DESC LIMIT ?",
+        (limit,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_processed_email_bill(message_id: str) -> bool:
+    """Removes a processed email bill entry (e.g. for re-processing or testing)."""
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM processed_email_bills WHERE message_id = ?", (message_id,))
+    deleted = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
 
 
 

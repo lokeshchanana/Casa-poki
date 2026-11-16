@@ -743,6 +743,26 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "finance_scan_email_bills",
+            "description": "Scans lokesh@lokeshchanana.com for operating expense bills, statements, membership dues, software subscriptions, and receipts. Strictly excludes real estate transaction documents (contracts, escrow orders, earnest money). Deduplicates and records valid overhead bills into Bigcapital accounting.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of candidate emails to scan. Defaults to 50.",
+                    },
+                    "force_reprocess": {
+                        "type": "boolean",
+                        "description": "Set to true to reprocess emails even if already recorded in the database. Defaults to false.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "finance_scan_drive_bills",
             "description": "Scans the designated Google Drive folder for bills and receipts, performs OCR on PDF and image documents, extracts vendor, amount, date, and category, and ingests new bills into Bigcapital accounting with deduplication.",
             "parameters": {
@@ -2284,6 +2304,15 @@ async def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         res["duration_ms"] = int((time.time() - start_ts) * 1000)
         return res
 
+    if name == "finance_scan_email_bills":
+        from email_bills_watcher import scan_and_ingest_email_bills
+
+        limit = args.get("limit", 50)
+        force_reprocess = args.get("force_reprocess", False)
+        res = await scan_and_ingest_email_bills(limit=limit, force_reprocess=force_reprocess)
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
     # Mailman Inbox Handler
     if name == "mailman_read_inbox":
         res = await _execute_mailman_inbox(args)
@@ -2711,6 +2740,36 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
                 )
         if already_cnt > 0 and not new_bills:
             lines.append("\n*All scanned receipts in this folder have already been recorded into Bigcapital.*")
+        lines.append(f"- **Accounting Portal:** [https://finance.lokeshchanana.com](https://finance.lokeshchanana.com)")
+        return "\n".join(lines)
+
+    if tool_name == "finance_scan_email_bills":
+        scanned = result.get("scanned_count", 0)
+        new_cnt = result.get("newly_ingested_count", 0)
+        already_cnt = result.get("already_processed_count", 0)
+        skipped_tx = result.get("skipped_transactions_count", 0)
+        err_cnt = result.get("error_count", 0)
+        account = result.get("account", "lokesh@lokeshchanana.com")
+        lines = [
+            f"### 📬 Email Bills Scanner — Fiona Banks & Silas Drake",
+            f"- **Mailbox Scanned:** `{account}`",
+            f"- **Candidate Emails Evaluated:** {scanned}",
+            f"- **Newly Ingested Operating Bills:** {new_cnt}",
+            f"- **Already Processed (Deduplicated):** {already_cnt}",
+            f"- **Transaction Documents Filtered (Excluded):** {skipped_tx}",
+        ]
+        if err_cnt > 0:
+            lines.append(f"- **Errors/Flagged:** {err_cnt}")
+        new_bills = result.get("new_bills", [])
+        if new_bills:
+            lines.append("\n**Newly Ingested Operating Bills into Bigcapital:**")
+            for b in new_bills:
+                lines.append(
+                    f"- **{b.get('vendor')}**: ${b.get('amount', 0.0):,.2f} "
+                    f"(Due: {b.get('due_date')}, Ref: `{b.get('reference_no')}`, Category: `{b.get('category')}`)"
+                )
+        if already_cnt > 0 and not new_bills:
+            lines.append("\n*All scanned operating bills in this mailbox have already been recorded into Bigcapital.*")
         lines.append(f"- **Accounting Portal:** [https://finance.lokeshchanana.com](https://finance.lokeshchanana.com)")
         return "\n".join(lines)
 

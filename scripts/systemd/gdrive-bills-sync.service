@@ -1,5 +1,5 @@
 [Unit]
-Description=Fiona Banks Google Drive Bills Ingestion Service
+Description=Fiona Banks Google Drive & Email Bills Ingestion Service
 After=docker.service
 Requires=docker.service
 
@@ -7,6 +7,7 @@ Requires=docker.service
 Type=oneshot
 User=root
 ExecStart=/usr/bin/docker exec agent-hub python3 /app/gdrive_bills_watcher.py
+ExecStart=/usr/bin/docker exec agent-hub python3 /app/email_bills_watcher.py
 TimeoutSec=300
 StandardOutput=journal
 StandardError=journal
