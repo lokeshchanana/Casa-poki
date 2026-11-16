@@ -136,6 +136,9 @@ function ReelCard({ reel, onOpen }) {
           ref={videoRef}
           src={reel.videoUrl}
           poster={reel.thumbnailUrl}
+          width={360}
+          height={640}
+          loading="lazy"
           muted={isMuted}
           loop
           playsInline
@@ -223,6 +226,8 @@ export default function InstagramReels({
   const [visibleCount, setVisibleCount] = useState(4);
   const [selectedIndex, setSelectedIndex] = useState(null);
   const touchStartX = useRef(null);
+  const dialogRef = useRef(null);
+  const pressedOutsideRef = useRef(false);
 
   useEffect(() => {
     const updateVisibleCount = () => {
@@ -261,29 +266,48 @@ export default function InstagramReels({
     setCurrentIndex((prev) => Math.min(prev, maxIndex));
   }, [maxIndex]);
 
-  // Keyboard navigation & scroll lock for lightbox modal
+  // Sync native <dialog> modal open/close & keyboard prev/next navigation
   useEffect(() => {
-    if (selectedIndex === null) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const dialog = dialogRef.current;
+    if (!dialog) return;
 
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        setSelectedIndex(null);
-      } else if (e.key === 'ArrowRight') {
-        setSelectedIndex((prev) => (prev !== null ? (prev + 1) % reels.length : null));
-      } else if (e.key === 'ArrowLeft') {
-        setSelectedIndex((prev) =>
-          prev !== null ? (prev - 1 + reels.length) % reels.length : null
-        );
+    if (selectedIndex !== null) {
+      if (!dialog.open) {
+        dialog.showModal();
       }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.body.style.overflow = prevOverflow;
-      window.removeEventListener('keydown', handleKeyDown);
-    };
+      const handleKeyDown = (e) => {
+        if (e.key === 'ArrowRight') {
+          setSelectedIndex((prev) => (prev !== null ? (prev + 1) % reels.length : null));
+        } else if (e.key === 'ArrowLeft') {
+          setSelectedIndex((prev) =>
+            prev !== null ? (prev - 1 + reels.length) % reels.length : null
+          );
+        }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    } else if (dialog.open) {
+      dialog.close();
+    }
   }, [selectedIndex, reels.length]);
+
+  const isOutsideDialog = (e, dialog) => {
+    const r = dialog.getBoundingClientRect();
+    return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+  };
+
+  const handleDialogPointerDown = (e) => {
+    if ('closedBy' in HTMLDialogElement.prototype || !dialogRef.current) return;
+    pressedOutsideRef.current = isOutsideDialog(e, dialogRef.current);
+  };
+
+  const handleDialogPointerUp = (e) => {
+    if ('closedBy' in HTMLDialogElement.prototype || !dialogRef.current) return;
+    if (pressedOutsideRef.current && isOutsideDialog(e, dialogRef.current)) {
+      setSelectedIndex(null);
+    }
+    pressedOutsideRef.current = false;
+  };
 
   const prevSlide = () => setCurrentIndex((prev) => Math.max(0, prev - 1));
   const nextSlide = () => setCurrentIndex((prev) => Math.min(maxIndex, prev + 1));
@@ -461,19 +485,18 @@ export default function InstagramReels({
         </div>
       </div>
 
-      {/* Cinema Lightbox Modal */}
-      {activeReel && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={activeReel.title}
-          onClick={() => setSelectedIndex(null)}
-          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="relative w-full max-w-4xl bg-charcoal-dark border border-silver/25 rounded-2xl overflow-hidden shadow-2xl grid grid-cols-1 md:grid-cols-12 max-h-[90vh]"
-          >
+      {/* Native Top-Layer Cinema Lightbox Modal */}
+      <dialog
+        ref={dialogRef}
+        closedby="any"
+        aria-labelledby="reel-modal-title"
+        onClose={() => setSelectedIndex(null)}
+        onPointerDown={handleDialogPointerDown}
+        onPointerUp={handleDialogPointerUp}
+        className="m-auto p-0 bg-transparent border-0 max-w-4xl w-[calc(100%-2rem)] max-h-[90vh] backdrop:bg-black/85 backdrop:backdrop-blur-sm open:flex items-center justify-center"
+      >
+        {activeReel && (
+          <div className="relative w-full bg-charcoal-dark border border-silver/25 rounded-2xl overflow-hidden shadow-2xl grid grid-cols-1 md:grid-cols-12 max-h-[90vh]">
             {/* Close Button */}
             <button
               type="button"
@@ -491,6 +514,8 @@ export default function InstagramReels({
                   key={activeReel.id}
                   src={activeReel.videoUrl}
                   poster={activeReel.thumbnailUrl}
+                  width={360}
+                  height={640}
                   controls
                   autoPlay
                   loop
@@ -536,7 +561,10 @@ export default function InstagramReels({
                   )}
                 </div>
 
-                <h3 className="font-serif font-bold text-2xl text-ivory leading-snug">
+                <h3
+                  id="reel-modal-title"
+                  className="font-serif font-bold text-2xl text-ivory leading-snug"
+                >
                   {activeReel.title}
                 </h3>
 
@@ -603,8 +631,8 @@ export default function InstagramReels({
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </dialog>
     </section>
   );
 }

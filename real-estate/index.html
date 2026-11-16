@@ -2,6 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="color-scheme" content="light dark" />
     <link rel="icon" type="image/png" href="/favicon-dark.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Lokesh Chanana (Loki) | Seattle &amp; Bellevue Realtor</title>
@@ -149,6 +150,10 @@
       (function() {
         try {
           const savedTheme = localStorage.getItem('theme');
+          const meta = document.querySelector('meta[name="color-scheme"]');
+          if (meta) {
+            meta.content = (savedTheme === 'light' || savedTheme === 'dark') ? savedTheme : 'light dark';
+          }
           const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
           if (savedTheme === 'dark' || (!savedTheme && systemDark) || (savedTheme === 'system' && systemDark)) {
             document.documentElement.classList.add('dark');

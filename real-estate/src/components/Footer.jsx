@@ -11,7 +11,7 @@ export default function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10 border-b border-silver/20 pb-12 mb-8">
           
           <div>
-             <img src="/lc-logo.png" alt="Lc" className="h-20 w-auto mx-auto md:mx-0 mb-4 opacity-80" />
+             <img src="/lc-logo.png" alt="Lc" loading="lazy" decoding="async" className="h-20 w-auto mx-auto md:mx-0 mb-4 opacity-80" />
              <h3 className="font-serif font-bold text-lg text-charcoal dark:text-silver uppercase tracking-widest">Lokesh Chanana</h3>
              <p className="text-[10px] font-sans text-charcoal-light dark:text-silver-dark uppercase tracking-widest mt-1">Real Estate Agent (Loki)</p>
              <div className="mt-4 flex justify-center md:justify-start">
@@ -22,8 +22,8 @@ export default function Footer() {
           <div className="lg:border-l border-silver/20 lg:pl-8">
              <p className="text-[10px] uppercase tracking-widest text-silver-dark font-bold mb-4">Official Partnerships</p>
              <div className="space-y-4 flex flex-col items-center md:items-start">
-               <a href="https://onereal.com/" target="_blank" rel="noopener noreferrer"><img src="/real-logo.png" alt="REAL Broker LLC" className="h-9 object-contain dark:invert hover:opacity-80 transition-opacity" /></a>
-               <a href="https://lakhaniteamre.com/" target="_blank" rel="noopener noreferrer"><img src="/lakhani-logo.png" alt="Lakhani Realtors" className="h-12 object-contain invert dark:invert-0 hover:opacity-80 transition-opacity" /></a>
+               <a href="https://onereal.com/" target="_blank" rel="noopener noreferrer"><img src="/real-logo.png" alt="REAL Broker LLC" loading="lazy" decoding="async" className="h-9 object-contain dark:invert hover:opacity-80 transition-opacity" /></a>
+               <a href="https://lakhaniteamre.com/" target="_blank" rel="noopener noreferrer"><img src="/lakhani-logo.png" alt="Lakhani Realtors" loading="lazy" decoding="async" className="h-12 object-contain invert dark:invert-0 hover:opacity-80 transition-opacity" /></a>
              </div>
           </div>
 

@@ -5,19 +5,28 @@ const ThemeContext = createContext();
 export function ThemeProvider({ children }) {
   // 'system' is the default mode as requested by user
   const [theme, setTheme] = useState(() => {
-    return localStorage.getItem('theme') || 'system';
+    try {
+      return localStorage.getItem('theme') || 'system';
+    } catch {
+      return 'system';
+    }
   });
 
   const [resolvedTheme, setResolvedTheme] = useState(() => {
     if (typeof window === 'undefined') return 'dark';
-    const saved = localStorage.getItem('theme');
-    if (saved === 'light' || saved === 'dark') return saved;
+    try {
+      const saved = localStorage.getItem('theme');
+      if (saved === 'light' || saved === 'dark') return saved;
+    } catch {
+      // Ignore storage access errors
+    }
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
 
-  // Apply theme to <html> element
+  // Apply theme to <html> element and synchronize <meta name="color-scheme">
   useEffect(() => {
     const root = document.documentElement;
+    const meta = document.querySelector('meta[name="color-scheme"]');
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
     const applyTheme = () => {
@@ -28,6 +37,10 @@ export function ThemeProvider({ children }) {
 
       setResolvedTheme(activeTheme);
 
+      if (meta) {
+        meta.content = theme === 'light' || theme === 'dark' ? theme : 'light dark';
+      }
+
       if (activeTheme === 'dark') {
         root.classList.add('dark');
       } else {
@@ -37,28 +50,56 @@ export function ThemeProvider({ children }) {
 
     applyTheme();
 
-    // Listen for device/OS preference changes if in system mode
     const handleSystemChange = () => {
       if (theme === 'system') {
         applyTheme();
       }
     };
 
+    const handleStorageChange = (e) => {
+      if (e.key === 'theme') {
+        setTheme(e.newValue || 'system');
+      }
+    };
+
     mediaQuery.addEventListener('change', handleSystemChange);
-    return () => mediaQuery.removeEventListener('change', handleSystemChange);
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      mediaQuery.removeEventListener('change', handleSystemChange);
+      window.removeEventListener('storage', handleStorageChange);
+    };
   }, [theme]);
 
-  // Toggle between Light and Dark
+  // Toggle between Light and Dark (or revert to system when target matches OS preference)
   const toggleTheme = () => {
     const nextTheme = resolvedTheme === 'dark' ? 'light' : 'dark';
-    setTheme(nextTheme);
-    localStorage.setItem('theme', nextTheme);
+    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+
+    if (nextTheme === systemTheme) {
+      setTheme('system');
+      try {
+        localStorage.removeItem('theme');
+      } catch {
+        // Ignore storage errors
+      }
+    } else {
+      setTheme(nextTheme);
+      try {
+        localStorage.setItem('theme', nextTheme);
+      } catch {
+        // Ignore storage errors
+      }
+    }
   };
 
   // Reset to device preference
   const resetToSystem = () => {
     setTheme('system');
-    localStorage.removeItem('theme');
+    try {
+      localStorage.removeItem('theme');
+    } catch {
+      // Ignore storage errors
+    }
   };
 
   return (

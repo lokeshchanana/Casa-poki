@@ -68,7 +68,7 @@ export default function MicroMarkets() {
             <Link to={market.link} key={market.name} className="group block relative border border-silver/30 dark:border-silver/10 hover:border-charcoal dark:hover:border-silver transition-all duration-300 bg-ivory dark:bg-charcoal overflow-hidden flex flex-col">
               
               <div className="h-48 w-full overflow-hidden relative">
-                <img src={market.image} alt={market.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-90 group-hover:opacity-100" />
+                <img src={market.image} alt={market.name} loading="lazy" decoding="async" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-90 group-hover:opacity-100" />
                 <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-charcoal/90 to-transparent p-4">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-silver-dark">{market.tag}</p>
                 </div>

@@ -1,11 +1,38 @@
-﻿@tailwind base;
+@tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  color-scheme: light dark;
+  --scrollbar-thumb: #64748b;
+  --scrollbar-track: #e5e1db;
+}
+
+:root:has(> head > meta[name="color-scheme"][content="dark"]) {
+  color-scheme: dark;
+  --scrollbar-thumb: #94a3b8;
+  --scrollbar-track: #151c23;
+}
+
+:root:has(> head > meta[name="color-scheme"][content="light"]) {
+  color-scheme: light;
+  --scrollbar-thumb: #64748b;
+  --scrollbar-track: #e5e1db;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:has(> head > meta[name="color-scheme"][content="light dark"]) {
+    --scrollbar-thumb: #94a3b8;
+    --scrollbar-track: #151c23;
+  }
+}
 
 @layer base {
   html {
     scroll-behavior: smooth;
     font-family: 'Plus Jakarta Sans', sans-serif;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   }
 }
 
@@ -13,17 +40,27 @@
   font-family: 'Playfair Display', serif;
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
+/* Native <dialog> modal scroll containment */
+dialog:modal {
+  overscroll-behavior: contain;
 }
-::-webkit-scrollbar-track {
-  background: #070d1f;
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
 }
-::-webkit-scrollbar-thumb {
-  background: #1c284e;
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #00b4d8;
+
+/* Legacy scrollbar fallback for browsers without scrollbar-color */
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+  }
 }

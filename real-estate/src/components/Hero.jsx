@@ -10,6 +10,8 @@ export default function Hero() {
         <img 
           src="https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=2000&q=80" 
           alt="Luxury Architecture"
+          fetchpriority="high"
+          decoding="async"
           className="w-full h-full object-cover opacity-60 dark:opacity-[0.50] grayscale"
         />
         <div className="absolute inset-0 bg-gradient-to-b from-transparent to-ivory dark:to-charcoal"></div>

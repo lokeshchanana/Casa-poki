@@ -50,7 +50,7 @@ export default function Resources() {
           {resources.map((resource) => (
             <div key={resource.title} className="bg-ivory dark:bg-charcoal border border-silver/30 dark:border-silver/20 overflow-hidden flex flex-col group hover:border-charcoal dark:hover:border-silver transition-colors shadow-lg">
               <div className="h-48 w-full overflow-hidden relative">
-                <img src={resource.image} alt={resource.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                <img src={resource.image} alt={resource.title} loading="lazy" decoding="async" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
                 <div className="absolute top-4 left-4 p-3 bg-white/90 dark:bg-charcoal-dark/90 backdrop-blur-sm border border-silver/20 text-charcoal dark:text-silver shadow-md">
                   {resource.icon}
                 </div>
