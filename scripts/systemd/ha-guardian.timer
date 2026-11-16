@@ -1,0 +1,11 @@
+[Unit]
+Description=Anna — Home Assistant Guardian 5-Minute Monitoring Timer
+Requires=ha-guardian.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

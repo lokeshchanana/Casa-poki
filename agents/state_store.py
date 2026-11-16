@@ -232,6 +232,24 @@ def init_store() -> None:
         """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ha_health_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            status TEXT NOT NULL,
+            ha_version TEXT,
+            total_entities INTEGER DEFAULT 0,
+            critical_unavailable INTEGER DEFAULT 0,
+            broken_automations INTEGER DEFAULT 0,
+            persistent_alerts INTEGER DEFAULT 0,
+            issues_json TEXT,
+            actions_taken_json TEXT,
+            summary TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+
     conn.commit()
     conn.close()
 
@@ -878,6 +896,15 @@ OFFICE_PERSONAS = [
         "color": "violet",
         "default_activity": "Analyzing Northwest MLS comps & valuation models",
     },
+    {
+        "id": "homeassistant",
+        "name": "Anna",
+        "role": "Home Assistant Guardian & Smart Home Engineer",
+        "station": "Smart Home & HA Control Pod",
+        "avatar": "🏠",
+        "color": "cyan",
+        "default_activity": "Monitoring Home Assistant (192.168.1.251) & auto-healing entities",
+    },
 ]
 
 
@@ -1323,6 +1350,62 @@ def delete_processed_email_bill(message_id: str) -> bool:
     conn.commit()
     conn.close()
     return deleted
+
+
+def log_ha_health_event(
+    status: str,
+    ha_version: Optional[str] = None,
+    total_entities: int = 0,
+    critical_unavailable: int = 0,
+    broken_automations: int = 0,
+    persistent_alerts: int = 0,
+    issues: Optional[List[Dict[str, Any]]] = None,
+    actions_taken: Optional[List[Dict[str, Any]]] = None,
+    summary: Optional[str] = None,
+) -> int:
+    """Persists a Home Assistant health audit / auto-heal event in agent_system.db."""
+    init_store()
+    now = datetime.utcnow().isoformat() + "Z"
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO ha_health_logs (
+            status, ha_version, total_entities, critical_unavailable,
+            broken_automations, persistent_alerts, issues_json,
+            actions_taken_json, summary, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            status,
+            ha_version,
+            total_entities,
+            critical_unavailable,
+            broken_automations,
+            persistent_alerts,
+            json.dumps(issues or []),
+            json.dumps(actions_taken or []),
+            summary or "",
+            now,
+        ),
+    )
+    row_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return row_id
+
+
+def list_ha_health_logs(limit: int = 20) -> List[Dict[str, Any]]:
+    """Returns recent Home Assistant health & remediation logs."""
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM ha_health_logs ORDER BY id DESC LIMIT ?", (limit,))
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 
 
 

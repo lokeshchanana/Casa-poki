@@ -1,0 +1,12 @@
+[Unit]
+Description=Anna — Home Assistant Guardian (Antigravity) Monitoring & Auto-Heal Service
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/docker exec agent-hub python3 /app/ha_guardian.py --auto-fix
+TimeoutSec=180
+StandardOutput=journal
+StandardError=journal

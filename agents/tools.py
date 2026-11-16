@@ -363,13 +363,13 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "delegate_to_agent",
-            "description": "Delegate a task, specialized analysis, or follow-up to another Casa-poki agent persona. Available target agents: 'manager', 'it', 'auditor', 'intake', 'finance', 'marketing', 'cma'.",
+            "description": "Delegate a task, specialized analysis, or follow-up to another Casa-poki agent persona. Available target agents: 'manager', 'it', 'auditor', 'intake', 'finance', 'marketing', 'cma', 'mailman', 'homeassistant' (Anna).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "target_agent": {
                         "type": "string",
-                        "enum": ["manager", "it", "auditor", "intake", "finance", "marketing", "cma", "mailman"],
+                        "enum": ["manager", "it", "auditor", "intake", "finance", "marketing", "cma", "mailman", "homeassistant"],
                         "description": "The specialist agent to delegate this task to",
                     },
                     "task_description": {
@@ -777,6 +777,68 @@ TOOL_SCHEMAS = [
                         "description": "Set to true to reprocess files even if they were already recorded in the database. Defaults to false.",
                     },
                 },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ha_health_check",
+            "description": "Anna (Home Assistant Guardian) performs a full diagnostic audit of Home Assistant (192.168.1.251:8123 / ha.lokeshchanana.com), checking API reachability, core state, configuration validity, unavailable critical entities, broken automations, persistent notifications, and companion smart-home containers.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "persist_log": {
+                        "type": "boolean",
+                        "description": "Whether to record the audit snapshot in ha_health_logs (default true).",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ha_fix_issues",
+            "description": "Anna (Home Assistant Guardian) safely diagnoses and auto-fixes detected Home Assistant issues: refreshes unavailable entities, reloads broken automations/integrations, restarts unhealthy companion containers (music-assistant, habridge), and performs a config-validated HA restart only if needed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "allow_restart": {
+                        "type": "boolean",
+                        "description": "Set to true only if a full Home Assistant core restart is explicitly requested or required (still gated on valid configuration.yaml). Defaults to false.",
+                    },
+                    "target_entities": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of specific entity_ids to force-refresh.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ha_call_service",
+            "description": "Calls any Home Assistant service (e.g., homeassistant.reload_config_entry, homeassistant.update_entity, automation.reload, light.turn_on, switch.toggle) via the HA REST API.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "domain": {
+                        "type": "string",
+                        "description": "Service domain (e.g. 'homeassistant', 'automation', 'light', 'switch', 'hassio').",
+                    },
+                    "service": {
+                        "type": "string",
+                        "description": "Service name (e.g. 'update_entity', 'reload', 'reload_config_entry', 'turn_on').",
+                    },
+                    "service_data": {
+                        "type": "object",
+                        "description": "Optional JSON payload for the service call (e.g. {'entity_id': 'light.living_room'}).",
+                    },
+                },
+                "required": ["domain", "service"],
             },
         },
     },
@@ -2313,6 +2375,36 @@ async def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         res["duration_ms"] = int((time.time() - start_ts) * 1000)
         return res
 
+    # Home Assistant Guardian (Anna) Handlers
+    if name == "ha_health_check":
+        from ha_guardian import check_ha_health
+
+        persist_log = args.get("persist_log", True)
+        res = await check_ha_health(persist_log=persist_log)
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
+    if name == "ha_fix_issues":
+        from ha_guardian import heal_ha_issues
+
+        allow_restart = bool(args.get("allow_restart", False))
+        target_entities = args.get("target_entities")
+        res = await heal_ha_issues(allow_restart=allow_restart, target_entities=target_entities)
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
+    if name == "ha_call_service":
+        from ha_guardian import ha_client
+
+        domain = args.get("domain", "homeassistant")
+        service = args.get("service", "check_config")
+        service_data = args.get("service_data") or {}
+        res = await ha_client.call_service(domain=domain, service=service, service_data=service_data)
+        res["domain"] = domain
+        res["service"] = service
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
     # Mailman Inbox Handler
     if name == "mailman_read_inbox":
         res = await _execute_mailman_inbox(args)
@@ -2624,9 +2716,11 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
         lines.append("|---|---|---|---|---|---|")
         for b in bills:
             v_name = b.get("vendor_name") or (b.get("vendor") or {}).get("display_name") or "Vendor"
+            amt = float(b.get("amount") or b.get("total") or b.get("due_amount") or 0)
+            due_amt = float(b.get("due_amount", 0) or 0)
             lines.append(
-                f"| `#{b.get('id')}` | **{v_name}** | ${float(b.get('amount', 0)):,.2f} | "
-                f"${float(b.get('due_amount', 0) or 0):,.2f} | `{b.get('due_date')}` | `{b.get('status', 'OPEN')}` |"
+                f"| `#{b.get('id')}` | **{v_name}** | ${amt:,.2f} | "
+                f"${due_amt:,.2f} | `{b.get('due_date')}` | `{b.get('status') or ('PAID' if due_amt == 0 else ('OVERDUE' if b.get('is_overdue') else 'OPEN'))}` |"
             )
         lines.append(f"\n[Open Bigcapital Portal](https://finance.lokeshchanana.com)")
         return "\n".join(lines)
@@ -2772,6 +2866,53 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
             lines.append("\n*All scanned operating bills in this mailbox have already been recorded into Bigcapital.*")
         lines.append(f"- **Accounting Portal:** [https://finance.lokeshchanana.com](https://finance.lokeshchanana.com)")
         return "\n".join(lines)
+
+    if tool_name == "ha_health_check":
+        status = result.get("status", "UNKNOWN")
+        icon = "🟢" if status == "HEALTHY" else ("🟡" if status == "DEGRADED" else "🔴")
+        lines = [
+            f"### 🏠 Home Assistant Health Audit — Anna ({icon} {status})",
+            f"- **Instance:** `{result.get('ha_url', 'http://192.168.1.251:8123')}` ([https://ha.lokeshchanana.com](https://ha.lokeshchanana.com))",
+            f"- **HA Version & State:** `{result.get('ha_version', 'unknown')}` (`{result.get('core_state', 'unknown')}`)",
+            f"- **Config Valid:** `{result.get('config_valid')}`",
+            f"- **Total Entities:** {result.get('total_entities', 0)} | **Critical Unavailable:** {result.get('critical_unavailable_count', 0)} | **Broken Automations:** {len(result.get('broken_automations', []))}",
+        ]
+        issues = result.get("issues", [])
+        if issues:
+            lines.append("\n**Detected Issues:**")
+            for iss in issues[:10]:
+                lines.append(f"- **[{iss.get('severity', 'info').upper()}]** {iss.get('message')}")
+        else:
+            lines.append("\n*All Home Assistant core services, automations, and critical entities are healthy.*")
+        return "\n".join(lines)
+
+    if tool_name == "ha_fix_issues":
+        pre = result.get("pre_status", "UNKNOWN")
+        post = result.get("post_status", "UNKNOWN")
+        actions = result.get("actions_taken", [])
+        lines = [
+            f"### 🛠️ Home Assistant Auto-Remediation — Anna",
+            f"- **Pre-Fix Status:** `{pre}` → **Post-Fix Status:** `{post}`",
+            f"- **Actions Executed:** {len(actions)}",
+        ]
+        if actions:
+            for act in actions:
+                ok_str = "PASS" if act.get("ok") else "FAILED"
+                lines.append(f"- `{act.get('action')}` ({ok_str})")
+        else:
+            lines.append("- *No remediation actions were needed; Home Assistant is operating normally.*")
+        lines.append(f"- **Dashboard:** [https://ha.lokeshchanana.com](https://ha.lokeshchanana.com)")
+        return "\n".join(lines)
+
+    if tool_name == "ha_call_service":
+        dom = result.get("domain", args.get("domain", ""))
+        svc = result.get("service", args.get("service", ""))
+        ok_str = "SUCCESS" if result.get("ok") else f"FAILED: {result.get('error')}"
+        return (
+            f"### 🏠 Home Assistant Service Call — Anna\n"
+            f"- **Service:** `{dom}.{svc}`\n"
+            f"- **Result:** {ok_str}"
+        )
 
     if tool_name == "mailman_read_inbox":
         account = result.get("account", "lokesh@lokeshchanana.com")

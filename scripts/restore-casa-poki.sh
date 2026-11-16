@@ -255,6 +255,11 @@ if [ -f "${REPO_DIR}/scripts/casa-poki-sync.sh" ]; then
     cp -a "${REPO_DIR}/scripts/systemd/instagram-reels-sync.timer" /etc/systemd/system/
     systemctl enable --now instagram-reels-sync.timer
   fi
+  if [ -f "${REPO_DIR}/scripts/systemd/ha-guardian.service" ]; then
+    cp -a "${REPO_DIR}/scripts/systemd/ha-guardian.service" /etc/systemd/system/
+    cp -a "${REPO_DIR}/scripts/systemd/ha-guardian.timer" /etc/systemd/system/
+    systemctl enable --now ha-guardian.timer
+  fi
   systemctl daemon-reload
   systemctl enable --now casa-poki-sync.timer
   log_ok "Nightly replication and Google Drive bills ingestion timers enabled."
