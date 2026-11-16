@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic Sync of Latest Instagram Reels (Every 2 Hours)
+Requires=instagram-reels-sync.service
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=2h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

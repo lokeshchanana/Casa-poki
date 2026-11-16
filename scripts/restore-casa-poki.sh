@@ -249,6 +249,12 @@ if [ -f "${REPO_DIR}/scripts/casa-poki-sync.sh" ]; then
     cp -a "${REPO_DIR}/scripts/systemd/gdrive-bills-sync.timer" /etc/systemd/system/
     systemctl enable --now gdrive-bills-sync.timer
   fi
+  if [ -f "${REPO_DIR}/scripts/systemd/instagram-reels-sync.service" ]; then
+    mkdir -p /tank/re_reels && chown "${TARGET_USER:-lokesh}:${TARGET_USER:-lokesh}" /tank/re_reels
+    cp -a "${REPO_DIR}/scripts/systemd/instagram-reels-sync.service" /etc/systemd/system/
+    cp -a "${REPO_DIR}/scripts/systemd/instagram-reels-sync.timer" /etc/systemd/system/
+    systemctl enable --now instagram-reels-sync.timer
+  fi
   systemctl daemon-reload
   systemctl enable --now casa-poki-sync.timer
   log_ok "Nightly replication and Google Drive bills ingestion timers enabled."

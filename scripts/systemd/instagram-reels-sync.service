@@ -1,0 +1,13 @@
+[Unit]
+Description=Sync Latest Instagram Reels for Lokesh Chanana Real Estate Website
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=lokesh
+WorkingDirectory=/home/lokesh/Casa-poki/real-estate
+ExecStart=/usr/bin/python3 /home/lokesh/Casa-poki/real-estate/sync_instagram_reels.py --auto
+TimeoutSec=180
+StandardOutput=journal
+StandardError=journal
