@@ -280,11 +280,12 @@ Use the exact Classic Maintenance Guide visual system scaled to `1080 × 1350 px
 - **Lower-Third & Caption Pill Style:**
   - Use `#151C23` Charcoal Dark @ `90%` opacity (`rgba(21, 28, 35, 0.90)`) with a `6 px` solid `#C0C0C0` Silver (or `#FAF8F5` Ivory) left accent bar, `Playfair Display Bold` topic title in `#FAF8F5` Ivory, and `Plus Jakarta Sans SemiBold` captions.
 
-### 10.3 Transactional & Drip Email Templates (Brevo HTML)
-- **Outer Wrapper:** `#F8FAFC` light neutral background, `24px 0` vertical padding.
-- **Main Email Card:** `max-width: 620px`, `#FFFFFF` White background, `12px` border-radius, `1px solid #E2E8F0` border.
-- **Branded Header:** `#0F172A` Navy background (`padding: 26px 28px`) with `3px solid #06B6D4` bottom accent, circular `68×68 px` avatar (`https://lokeshchanana.com/loki-profile.jpg`) with `2px solid #38BDF8` border, uppercase kicker (`LOKESH CHANANA (LOKI) • REAL ESTATE BROKER` in `#38BDF8`), and `20px` white headline.
-- **Body & Callouts:** `15px–16px` body text in `#334155`, `1.6` line-height; resource callouts in `#F0F9FF` with `4px solid #06B6D4` left border; referral & support box in `#F8FAFC` above the full HTML signature (`email-signature.html`).
+### 10.3 Transactional & Drip Email Templates (Brevo HTML — Light & Dark Mode)
+- **Outer Wrapper & Card:** `#FAF8F5` Warm Ivory outer wrapper (`#151C23` in Dark Mode); `max-width: 620px` `#FFFFFF` White email card (`#1F2933` in Dark Mode) with `1px solid #E0E0E0` border (`#2D3A47` in Dark Mode).
+- **Top Crown & Co-Branded Header:** `6px` solid `#1F2933` Charcoal top crown bar above a `#FAF8F5` Ivory co-branded bar (`lc-logo.png` + `LOKESH CHANANA • REALTOR® • GREATER SEATTLE` on left; `real-logo.png` on right).
+- **Editorial Title Block:** Outlined Kicker Pill Badge (`DAY X • TOPIC`) above a `24px` `Playfair Display Bold` headline (`#1F2933` Charcoal in Light Mode; `#FAF8F5` Ivory in Dark Mode).
+- **Body & Signature Cards:** `15px–16px` `Plus Jakarta Sans` body text in `#2D3A47` (`#C0C0C0` in Dark Mode), `1.6` line-height; all callouts, checklists, and support/referral boxes styled as `#FAF8F5` Ivory cards (`#151C23` in Dark Mode) with `1px solid #E0E0E0` border and a **`4px solid #1F2933` Charcoal left accent bar** (`#C0C0C0` Silver in Dark Mode).
+- **Dark Anchor Agent Footer:** Solid `#1F2933` Charcoal banner with `3px solid #C0C0C0` Silver top border, Silver-framed `72×72px` portrait, `Playfair Display Bold` name in `#FAF8F5` Ivory, `#C0C0C0` Silver license/role subtitle, and clickable phone/email/web/vCard links above a clean `#FAF8F5` Ivory compliance footer.
 - **Attachments:** Privately stored PDFs (such as `Home_Maintenance_Guide_Lokesh_Chanana.pdf`) must always be attached via raw Base64 `content` in `/v3/smtp/email` rather than public links.
 
 ---
