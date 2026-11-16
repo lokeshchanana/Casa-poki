@@ -195,7 +195,7 @@ function buildSemanticRootHtml(routePath, seo) {
           .join('\n')}</section>`
       : '';
 
-  return `<main class="max-w-5xl mx-auto px-4 py-16">
+  return `<main data-prerender-seo="true" class="max-w-5xl mx-auto px-4 py-16">
     <header>
       <p>Lokesh Chanana (Loki) • Licensed Real Estate Broker (#26006634) • REAL Broker LLC &amp; Lakhani Team</p>
       <h1>${escapeHtml(content.h1)}</h1>

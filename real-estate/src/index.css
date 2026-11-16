@@ -40,6 +40,11 @@
   font-family: 'Playfair Display', serif;
 }
 
+/* Hide pre-rendered SEO-only DOM before React mounts when JS is enabled (prevents flash of unstyled text) */
+html.js-enabled [data-prerender-seo="true"] {
+  display: none;
+}
+
 /* Native <dialog> modal scroll containment */
 dialog:modal {
   overscroll-behavior: contain;
