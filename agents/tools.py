@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import os
@@ -1765,18 +1766,25 @@ async def _send_brevo_template(
         "params": params or {},
     }
     if int(template_id) == 6:
-        guide_url = os.environ.get(
-            "MAINTENANCE_GUIDE_PDF_URL",
-            "https://dev.lokeshchanana.com/home-maintenance-guide.pdf",
+        default_path = (
+            "/app/assets/home-maintenance-guide-classic.pdf"
+            if os.path.exists("/app/assets/home-maintenance-guide-classic.pdf")
+            else "/home/lokesh/Casa-poki/agents/assets/home-maintenance-guide-classic.pdf"
         )
-        payload["attachment"] = [
-            {
-                "url": guide_url,
-                "name": "Home_Maintenance_Guide_Lokesh_Chanana.pdf",
-            }
-        ]
+        guide_path = os.environ.get("MAINTENANCE_GUIDE_PDF_PATH", default_path)
+        if os.path.exists(guide_path):
+            with open(guide_path, "rb") as f:
+                b64_pdf = base64.b64encode(f.read()).decode("ascii")
+            payload["attachment"] = [
+                {
+                    "content": b64_pdf,
+                    "name": "Home_Maintenance_Guide_Lokesh_Chanana.pdf",
+                }
+            ]
+        else:
+            logger.warning(f"Maintenance guide PDF not found at {guide_path}")
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=45.0) as client:
             resp = await client.post(url, headers=_brevo_headers(), json=payload)
             if resp.status_code in (200, 201, 202):
                 data = resp.json()

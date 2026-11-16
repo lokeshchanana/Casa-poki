@@ -1956,7 +1956,9 @@ def main():
         "keywords": "Home Maintenance, Checklist, Lokesh Chanana, Real Broker, Seattle Real Estate",
     })
 
-    out_pdf = f"{PUBLIC_DIR}/home-maintenance-guide-classic.pdf" if EDITION == "classic" else f"{PUBLIC_DIR}/home-maintenance-guide.pdf"
+    out_dir = "/home/lokesh/Casa-poki/agents/assets"
+    os.makedirs(out_dir, exist_ok=True)
+    out_pdf = f"{out_dir}/home-maintenance-guide-classic.pdf" if EDITION == "classic" else f"{out_dir}/home-maintenance-guide-luxury.pdf"
     doc.subset_fonts()
     doc.save(out_pdf, garbage=3, deflate=True)
     sz_mb = os.path.getsize(out_pdf) / (1024 * 1024)
