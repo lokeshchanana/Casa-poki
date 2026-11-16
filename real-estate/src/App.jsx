@@ -31,10 +31,10 @@ function Home() {
   return (
     <>
       <Hero />
+      <InstagramReels />
       <MicroMarkets />
       <TechnicalEdge />
       <Resources />
-      <InstagramReels />
       <FAQSection routePath="/" />
       <ContactSection />
     </>
