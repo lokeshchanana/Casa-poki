@@ -74,6 +74,19 @@ export default function Header() {
                   <Link to="/markets/north-sound" className="block px-4 py-2 text-xs uppercase tracking-widest text-charcoal dark:text-silver hover:bg-ivory dark:hover:bg-charcoal">North Sound Corridor</Link>
                   <Link to="/markets/south-sound" className="block px-4 py-2 text-xs uppercase tracking-widest text-charcoal dark:text-silver hover:bg-ivory dark:hover:bg-charcoal">South Sound Hub</Link>
                   <Link to="/markets/thurston-belt" className="block px-4 py-2 text-xs uppercase tracking-widest text-charcoal dark:text-silver hover:bg-ivory dark:hover:bg-charcoal">Capital & Exurban Fringe</Link>
+                  <div className="my-2 border-t border-silver/20 pt-2 px-4">
+                    <span className="block text-[9px] font-bold uppercase tracking-[0.2em] text-silver-dark mb-1.5">City Guides</span>
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+                      <Link to="/cities/seattle" className="py-1 text-[11px] text-charcoal-light dark:text-silver-dark hover:text-charcoal dark:hover:text-silver">Seattle</Link>
+                      <Link to="/cities/bellevue" className="py-1 text-[11px] text-charcoal-light dark:text-silver-dark hover:text-charcoal dark:hover:text-silver">Bellevue</Link>
+                      <Link to="/cities/kirkland" className="py-1 text-[11px] text-charcoal-light dark:text-silver-dark hover:text-charcoal dark:hover:text-silver">Kirkland</Link>
+                      <Link to="/cities/redmond" className="py-1 text-[11px] text-charcoal-light dark:text-silver-dark hover:text-charcoal dark:hover:text-silver">Redmond</Link>
+                      <Link to="/cities/kent" className="py-1 text-[11px] text-charcoal-light dark:text-silver-dark hover:text-charcoal dark:hover:text-silver">Kent</Link>
+                      <Link to="/cities/renton" className="py-1 text-[11px] text-charcoal-light dark:text-silver-dark hover:text-charcoal dark:hover:text-silver">Renton</Link>
+                      <Link to="/cities/auburn" className="py-1 text-[11px] text-charcoal-light dark:text-silver-dark hover:text-charcoal dark:hover:text-silver">Auburn</Link>
+                      <Link to="/cities/tacoma" className="py-1 text-[11px] text-charcoal-light dark:text-silver-dark hover:text-charcoal dark:hover:text-silver">Tacoma</Link>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -152,6 +165,16 @@ export default function Header() {
                 <Link to="/markets/north-sound" onClick={() => setMobileMenuOpen(false)} className="block text-xs uppercase tracking-widest text-charcoal dark:text-silver">North Sound Corridor</Link>
                 <Link to="/markets/south-sound" onClick={() => setMobileMenuOpen(false)} className="block text-xs uppercase tracking-widest text-charcoal dark:text-silver">South Sound Hub</Link>
                 <Link to="/markets/thurston-belt" onClick={() => setMobileMenuOpen(false)} className="block text-xs uppercase tracking-widest text-charcoal dark:text-silver">Capital & Exurban Fringe</Link>
+                <div className="pt-2 border-t border-silver/20 grid grid-cols-2 gap-2">
+                  <Link to="/cities/seattle" onClick={() => setMobileMenuOpen(false)} className="text-xs text-charcoal-light dark:text-silver-dark hover:text-charcoal dark:hover:text-silver">Seattle, WA</Link>
+                  <Link to="/cities/bellevue" onClick={() => setMobileMenuOpen(false)} className="text-xs text-charcoal-light dark:text-silver-dark hover:text-charcoal dark:hover:text-silver">Bellevue, WA</Link>
+                  <Link to="/cities/kirkland" onClick={() => setMobileMenuOpen(false)} className="text-xs text-charcoal-light dark:text-silver-dark hover:text-charcoal dark:hover:text-silver">Kirkland, WA</Link>
+                  <Link to="/cities/redmond" onClick={() => setMobileMenuOpen(false)} className="text-xs text-charcoal-light dark:text-silver-dark hover:text-charcoal dark:hover:text-silver">Redmond, WA</Link>
+                  <Link to="/cities/kent" onClick={() => setMobileMenuOpen(false)} className="text-xs text-charcoal-light dark:text-silver-dark hover:text-charcoal dark:hover:text-silver">Kent, WA</Link>
+                  <Link to="/cities/renton" onClick={() => setMobileMenuOpen(false)} className="text-xs text-charcoal-light dark:text-silver-dark hover:text-charcoal dark:hover:text-silver">Renton, WA</Link>
+                  <Link to="/cities/auburn" onClick={() => setMobileMenuOpen(false)} className="text-xs text-charcoal-light dark:text-silver-dark hover:text-charcoal dark:hover:text-silver">Auburn, WA</Link>
+                  <Link to="/cities/tacoma" onClick={() => setMobileMenuOpen(false)} className="text-xs text-charcoal-light dark:text-silver-dark hover:text-charcoal dark:hover:text-silver">Tacoma, WA</Link>
+                </div>
               </div>
             </div>
 

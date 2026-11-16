@@ -1,7 +1,8 @@
 
 import React from 'react';
-import { ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight, MapPin } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { CITY_PAGES_DATA } from '../data/cityPagesData';
 
 export default function MicroMarkets() {
   const markets = [
@@ -97,6 +98,46 @@ export default function MicroMarkets() {
               </div>
             </Link>
           ))}
+        </div>
+
+        {/* Hyper-Local City Market Guides */}
+        <div className="mt-14 pt-10 border-t border-silver/20">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <div>
+              <span className="text-[10px] uppercase tracking-widest text-silver-dark font-bold block mb-1">
+                Hyper-Local Intelligence
+              </span>
+              <h3 className="font-serif font-bold text-2xl text-charcoal dark:text-silver">
+                City Market Guides
+              </h3>
+            </div>
+            <p className="text-xs text-charcoal-light dark:text-silver-dark max-w-md">
+              Explore neighborhood breakdowns, commute corridors, and live market velocity by city.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+            {Object.values(CITY_PAGES_DATA).map((city) => (
+              <Link
+                key={city.slug}
+                to={`/cities/${city.slug}`}
+                className="group p-3.5 bg-ivory dark:bg-charcoal border border-silver/30 dark:border-silver/15 hover:border-charcoal dark:hover:border-silver transition-colors flex flex-col justify-between"
+              >
+                <div className="flex items-center justify-between gap-1 mb-2">
+                  <span className="inline-flex items-center gap-1 font-serif font-bold text-sm text-charcoal dark:text-silver">
+                    <MapPin className="w-3 h-3 text-silver-dark group-hover:text-charcoal dark:group-hover:text-silver transition-colors shrink-0" />
+                    {city.city}
+                  </span>
+                  <ArrowUpRight className="w-3.5 h-3.5 text-silver-dark group-hover:text-charcoal dark:group-hover:text-silver transition-colors shrink-0" />
+                </div>
+                <div className="text-[10px] text-charcoal-light dark:text-silver-dark font-sans">
+                  <span>{city.avgPrice}</span>
+                  <span className="mx-1 opacity-40">•</span>
+                  <span>{city.avgDom}</span>
+                </div>
+              </Link>
+            ))}
+          </div>
         </div>
 
       </div>
