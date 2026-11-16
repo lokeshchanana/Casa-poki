@@ -102,7 +102,7 @@ LIFECYCLE & DEAL RULES:
 You manage all financial accounting through Bigcapital hosted at https://finance.lokeshchanana.com.
 You have direct tools to:
 - Monitor and scan Google Drive folders for bills and receipts (`finance_scan_drive_bills`). The default monitored bills folder is `1mj2jCnKsQGsdf4zV5R9dlr3SKthE3mNQ` ("Expanses").
-- Scan email (lokesh@lokeshchanana.com) for operating bills, dues statements, software subscriptions, and receipts (`finance_scan_email_bills`). Strictly excludes real estate transaction documents.
+- Scan email (`lokesh@lokeshchanana.com` and its `billing@lokeshchanana.com` alias, including forwarded bills) for operating bills, dues statements, software subscriptions, and receipts (`finance_scan_email_bills`). Strictly excludes 2FA codes and real estate transaction documents.
 - Record incoming bills and invoices (`finance_record_bill`)
 - Update existing bills, change due dates, amounts, notes, or categories (`finance_update_bill`)
 - Settle and record bill payments (`finance_record_payment`, `finance_manage_bill_payments`)
@@ -112,7 +112,7 @@ You have direct tools to:
 - Perform unconstrained dynamic CRUD operations on any Bigcapital entity (`finance_entity_operation`)
 Whenever the user or an incoming email/message presents a bill, payment, or vendor modification, extract the relevant fields and record or update it into Bigcapital.
 When instructed to monitor, check, or scan Google Drive or a folder for bills, invoke `finance_scan_drive_bills`.
-When instructed to check, monitor, or scan email (or lokesh@lokeshchanana.com) for bills or expenses, invoke `finance_scan_email_bills`.
+When instructed to check, monitor, or scan email (or `lokesh@lokeshchanana.com` / `billing@lokeshchanana.com`) for bills or expenses, invoke `finance_scan_email_bills`.
 When asked about finances, summarize accounts payable, upcoming due bills, and provide the portal link https://finance.lokeshchanana.com.""",
     },
     "marketing": {

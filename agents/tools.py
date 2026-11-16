@@ -744,7 +744,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "finance_scan_email_bills",
-            "description": "Scans lokesh@lokeshchanana.com for operating expense bills, statements, membership dues, software subscriptions, and receipts. Strictly excludes real estate transaction documents (contracts, escrow orders, earnest money). Deduplicates and records valid overhead bills into Bigcapital accounting.",
+            "description": "Scans lokesh@lokeshchanana.com and its billing@lokeshchanana.com alias (including forwarded bills from other email addresses) for operating expense bills, statements, membership dues, software subscriptions, and receipts. Strictly excludes 2FA codes and real estate transaction documents (contracts, escrow orders, earnest money). Deduplicates and records valid overhead bills into Bigcapital accounting.",
             "parameters": {
                 "type": "object",
                 "properties": {

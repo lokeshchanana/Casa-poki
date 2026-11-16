@@ -12,12 +12,15 @@ import email
 from email.header import decode_header
 import io
 import imaplib
+import json
 import logging
 import os
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from bs4 import BeautifulSoup
+import httpx
 from pypdf import PdfReader
 from PIL import Image
 import pytesseract
@@ -38,6 +41,9 @@ IMAP_SERVER = os.environ.get("MAIL_IMAP_SERVER", "imap.gmail.com")
 IMAP_PORT = int(os.environ.get("MAIL_IMAP_PORT", "993"))
 IMAP_USER = os.environ.get("MAIL_IMAP_USER", "lokesh@lokeshchanana.com")
 IMAP_PASSWORD = os.environ.get("MAIL_IMAP_PASSWORD", "").strip("\"'").replace(" ", "")
+BILLING_ALIAS = os.environ.get("MAIL_BILLING_ALIAS", "billing@lokeshchanana.com").lower()
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://192.168.1.240:11434").rstrip("/")
+OLLAMA_BILL_MODEL = os.environ.get("OLLAMA_BILL_MODEL", "qwen2.5:3b")
 
 # Strict Exclusion Lists for Real Estate Transaction Paperwork
 EXCLUDED_SENDERS = [
@@ -79,7 +85,9 @@ EXCLUDED_SUBJECT_KEYWORDS = [
     "events & training",
     "what’s ahead",
     "verification code",
+    "is your verification code",
     "two-factor",
+    "passcode",
     "webinar",
 ]
 
@@ -159,6 +167,126 @@ def extract_pdf_and_ocr(payload: bytes, filename: str) -> str:
             pass
 
     return "\n\n".join(text_parts)
+
+
+def _extract_html_text(html_bytes: bytes) -> str:
+    """Converts HTML email body into clean readable text."""
+    try:
+        soup = BeautifulSoup(html_bytes.decode(errors="ignore"), "html.parser")
+        for tag in soup(["script", "style", "head"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n", strip=True)
+        return re.sub(r"\n{3,}", "\n\n", text).strip()
+    except Exception:
+        return ""
+
+
+def _extract_image_ocr(img_bytes: bytes) -> str:
+    """Runs pytesseract OCR on an attached or inline image receipt/bill."""
+    try:
+        im = Image.open(io.BytesIO(img_bytes))
+        return pytesseract.image_to_string(im).strip()
+    except Exception:
+        return ""
+
+
+def _extract_forwarded_context(sender: str, subject: str, body_text: str) -> Tuple[str, str]:
+    """
+    If Lokesh forwards a bill to billing@lokeshchanana.com, extracts the
+    underlying original sender and strips 'Fwd:'/'Fw:' from subject.
+    """
+    clean_subject = re.sub(r"^(?:fwd?|fw)\s*:\s*", "", subject, flags=re.IGNORECASE).strip()
+    effective_sender = sender
+
+    if "lokesh" in sender.lower() and body_text:
+        fwd_from = re.search(r"From:\s*([^\r\n]+)", body_text, re.IGNORECASE)
+        if fwd_from and "lokesh" not in fwd_from.group(1).lower():
+            effective_sender = fwd_from.group(1).strip()
+
+    return effective_sender, clean_subject
+
+
+async def _llm_extract_operating_bill(
+    sender: str,
+    subject: str,
+    body_text: str,
+    attachments_text: str,
+    msg_id: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Universal fallback extractor using local Ollama for forwarded or new-vendor
+    operating expense bills sent to billing@lokeshchanana.com.
+    """
+    snippet = f"From: {sender}\nSubject: {subject}\n\nBody:\n{body_text[:2500]}\n\nAttachments:\n{attachments_text[:2500]}"
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    prompt = (
+        "Extract bill/expense details from this email into ONLY valid JSON with these exact keys:\n"
+        "{\n"
+        '  "document_type": "bill_or_receipt" | "2fa_code" | "newsletter_or_promo" | "real_estate_transaction_doc",\n'
+        '  "vendor_name": "Company or merchant charging the bill (NEVER Lokesh Chanana)",\n'
+        '  "amount": 0.00,\n'
+        f'  "bill_date": "YYYY-MM-DD (default {today_str} if unknown)",\n'
+        f'  "due_date": "YYYY-MM-DD (default to bill_date if unknown)",\n'
+        '  "reference_no": "Invoice, receipt, account, or order number if present, else empty string",\n'
+        '  "category": "One of: MLS Dues & Subscriptions, Software & Subscriptions, Utilities, Marketing, Insurance, Office Supplies, Repairs & Maintenance, General Expense",\n'
+        '  "note": "Brief 1-sentence summary of the bill or receipt"\n'
+        "}\n\n"
+        "RULES:\n"
+        '- Set document_type="bill_or_receipt" for any utility, internet, phone, software, subscription, insurance, marketing, supply, or service bill/invoice/receipt.\n'
+        '- Set document_type="2fa_code" for verification/login codes.\n'
+        '- Set document_type="real_estate_transaction_doc" for escrow, earnest money, title commitment, or purchase contracts.\n'
+        "- If the email was forwarded by Lokesh, extract the ORIGINAL vendor/company name, NOT Lokesh.\n\n"
+        f"EMAIL CONTENT:\n{snippet}"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            resp = await client.post(
+                f"{OLLAMA_BASE_URL}/api/generate",
+                json={
+                    "model": OLLAMA_BILL_MODEL,
+                    "prompt": prompt,
+                    "format": "json",
+                    "stream": False,
+                },
+            )
+            if resp.status_code != 200:
+                return None
+            raw_json = resp.json().get("response", "{}")
+            data = json.loads(raw_json)
+    except Exception as e:
+        logger.warning(f"LLM bill extraction failed for '{subject}': {e}")
+        return None
+
+    if data.get("document_type") != "bill_or_receipt":
+        return None
+
+    try:
+        amount = float(data.get("amount") or 0.0)
+    except Exception:
+        amount = 0.0
+
+    vendor = str(data.get("vendor_name") or "").strip()
+    if amount <= 0 or not vendor or "lokesh" in vendor.lower():
+        return None
+
+    bill_date = str(data.get("bill_date") or today_str).strip()
+    due_date = str(data.get("due_date") or bill_date).strip()
+    ref_no = str(data.get("reference_no") or "").strip() or f"EMAIL-{msg_id[:12]}"
+    category = str(data.get("category") or "General Expense").strip()
+    note = str(data.get("note") or f"Forwarded/Email bill from {vendor} ({subject[:60]})").strip()
+
+    return {
+        "message_id": msg_id,
+        "vendor": vendor,
+        "amount": round(amount, 2),
+        "bill_date": bill_date,
+        "due_date": due_date,
+        "reference_no": ref_no,
+        "category": category,
+        "note": note,
+    }
 
 
 def parse_operating_bill(
@@ -334,8 +462,9 @@ async def scan_and_ingest_email_bills(
             "already_processed": [],
         }
 
-    # Targeted search for financial intent, billing senders, or unread messages
+    # Targeted search for billing alias, financial intent, billing senders, or unread messages
     search_queries = [
+        '(TO "billing@lokeshchanana.com")',
         '(OR (SUBJECT "statement") (OR (SUBJECT "invoice") (OR (SUBJECT "dues") (OR (SUBJECT "bill") (OR (SUBJECT "subscription") (OR (FROM "ebill") (FROM "billing")))))))',
         'UNSEEN',
     ]
@@ -382,11 +511,13 @@ async def scan_and_ingest_email_bills(
     for mid in reversed(recent_ids):
         try:
             # Phase 1: Fast header-only inspection
-            res_hdr, hdr_data = mail.fetch(mid, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])")
+            res_hdr, hdr_data = mail.fetch(mid, "(BODY.PEEK[HEADER.FIELDS (FROM TO DELIVERED-TO SUBJECT DATE MESSAGE-ID)])")
             if res_hdr != "OK" or not hdr_data:
                 continue
 
             sender = ""
+            to_hdr = ""
+            delivered_to = ""
             subject = ""
             date_hdr = ""
             msg_id = f"imap_msg_{mid.decode()}"
@@ -396,9 +527,13 @@ async def scan_and_ingest_email_bills(
                     h_msg = email.message_from_bytes(part_h[1])
                     msg_id = h_msg.get("Message-ID") or msg_id
                     sender = _decode_header_str(h_msg.get("From", ""))
+                    to_hdr = _decode_header_str(h_msg.get("To", ""))
+                    delivered_to = _decode_header_str(h_msg.get("Delivered-To", ""))
                     subject = _decode_header_str(h_msg.get("Subject", ""))
                     date_hdr = h_msg.get("Date", "")
                     break
+
+            is_billing_alias = BILLING_ALIAS in to_hdr.lower() or BILLING_ALIAS in delivered_to.lower()
 
             # Check deduplication first
             if not force_reprocess and is_email_bill_processed(msg_id):
@@ -410,14 +545,20 @@ async def scan_and_ingest_email_bills(
                 skipped_transactions.append(subject)
                 continue
 
-            # Check if header matches financial intent or known vendors
+            # Check if header matches billing alias, financial intent, or known vendors
             lower_hdr = (sender + " " + subject).lower()
             known_vendor_kw = [
                 "nwmls", "ebill", "google", "brevo", "twilio", "docusign",
                 "zoom", "hetzner", "cloudflare", "namecheap", "godaddy",
-                "pse", "seattle city light", "staples", "adobe", "canva"
+                "pse", "seattle city light", "staples", "adobe", "canva",
+                "comcast", "xfinity", "verizon", "at&t", "t-mobile",
+                "state farm", "geico", "progressive", "capcut"
             ]
-            has_financial_header = any(k in lower_hdr for k in FINANCIAL_INTENT_KEYWORDS) or any(k in lower_hdr for k in known_vendor_kw)
+            has_financial_header = (
+                is_billing_alias
+                or any(k in lower_hdr for k in FINANCIAL_INTENT_KEYWORDS)
+                or any(k in lower_hdr for k in known_vendor_kw)
+            )
             if not has_financial_header:
                 continue
 
@@ -431,40 +572,72 @@ async def scan_and_ingest_email_bills(
                     continue
 
                 msg = email.message_from_bytes(part_r[1])
-                body_text = ""
+                plain_text = ""
+                html_text = ""
                 attachments_text = ""
 
                 if msg.is_multipart():
                     for part in msg.walk():
-                        ctype = part.get_content_type()
-                        fname = part.get_filename() or ""
+                        ctype = (part.get_content_type() or "").lower()
+                        fname = (part.get_filename() or "").lower()
                         if ctype == "text/plain":
                             pl = part.get_payload(decode=True)
                             if pl:
-                                body_text += pl.decode(errors="ignore") + "\n"
-                        elif fname.lower().endswith(".pdf"):
+                                plain_text += pl.decode(errors="ignore") + "\n"
+                        elif ctype == "text/html":
                             pl = part.get_payload(decode=True)
                             if pl:
-                                attachments_text += extract_pdf_and_ocr(pl, fname) + "\n"
+                                html_text += _extract_html_text(pl) + "\n"
+                        elif fname.endswith(".pdf") or ctype == "application/pdf":
+                            pl = part.get_payload(decode=True)
+                            if pl:
+                                attachments_text += extract_pdf_and_ocr(pl, fname or "attachment.pdf") + "\n"
+                        elif ctype.startswith("image/") or fname.endswith((".png", ".jpg", ".jpeg", ".webp")):
+                            pl = part.get_payload(decode=True)
+                            if pl:
+                                ocr_res = _extract_image_ocr(pl)
+                                if ocr_res:
+                                    attachments_text += ocr_res + "\n"
                 else:
                     pl = msg.get_payload(decode=True)
                     if pl:
-                        body_text = pl.decode(errors="ignore")
+                        if (msg.get_content_type() or "").lower() == "text/html":
+                            html_text = _extract_html_text(pl)
+                        else:
+                            plain_text = pl.decode(errors="ignore")
+
+                body_text = plain_text.strip() if len(plain_text.strip()) >= len(html_text.strip()) else html_text.strip()
+                if not body_text:
+                    body_text = html_text.strip() or plain_text.strip()
+
+                eff_sender, eff_subject = _extract_forwarded_context(sender, subject, body_text)
 
                 # Double check transaction content in body
-                if is_transaction_document(sender, subject, body_text):
+                if is_transaction_document(eff_sender, eff_subject, body_text):
                     skipped_transactions.append(subject)
                     continue
 
-                # Parse Operating Bill
+                # 1) Try deterministic operating bill parser
                 parsed = parse_operating_bill(
-                    sender=sender,
-                    subject=subject,
+                    sender=eff_sender,
+                    subject=eff_subject,
                     date_str=date_hdr,
                     body_text=body_text,
                     attachments_text=attachments_text,
                     msg_id=msg_id,
                 )
+
+                # 2) Universal LLM fallback for forwarded/unseen vendors sent to billing@
+                if not parsed and (is_billing_alias or any(k in (eff_subject + " " + body_text).lower() for k in FINANCIAL_INTENT_KEYWORDS)):
+                    combined_check = f"{eff_subject}\n{body_text}\n{attachments_text}"
+                    if re.search(r"\$\s*[0-9]+[\.,][0-9]{2}|(?:total|amount due|balance due|charged)\s*[:\.]?\s*[0-9]+[\.,][0-9]{2}", combined_check, re.IGNORECASE):
+                        parsed = await _llm_extract_operating_bill(
+                            sender=eff_sender,
+                            subject=eff_subject,
+                            body_text=body_text,
+                            attachments_text=attachments_text,
+                            msg_id=msg_id,
+                        )
 
                 if not parsed:
                     continue
