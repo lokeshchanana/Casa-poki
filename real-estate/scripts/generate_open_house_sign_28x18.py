@@ -94,8 +94,50 @@ def draw_crop_marks(page):
         )
 
 
-def build_sign():
+def draw_arrow(page, direction, cx, cy, width=210.0, height=136.0, color=IVORY):
+    """Draw a bold, crisp architectural directional arrow pointing left or right."""
+    hw = width / 2.0
+    hh = height / 2.0
+    shaft_h = height * 0.34
+    hsh = shaft_h / 2.0
+    head_w = width * 0.48
+
+    if direction == "left":
+        tip_x = cx - hw
+        neck_x = tip_x + head_w
+        tail_x = cx + hw
+        pts = [
+            pymupdf.Point(tx(tip_x), ty(cy)),
+            pymupdf.Point(tx(neck_x), ty(cy - hh)),
+            pymupdf.Point(tx(neck_x), ty(cy - hsh)),
+            pymupdf.Point(tx(tail_x), ty(cy - hsh)),
+            pymupdf.Point(tx(tail_x), ty(cy + hsh)),
+            pymupdf.Point(tx(neck_x), ty(cy + hsh)),
+            pymupdf.Point(tx(neck_x), ty(cy + hh)),
+        ]
+    else:
+        tip_x = cx + hw
+        neck_x = tip_x - head_w
+        tail_x = cx - hw
+        pts = [
+            pymupdf.Point(tx(tip_x), ty(cy)),
+            pymupdf.Point(tx(neck_x), ty(cy - hh)),
+            pymupdf.Point(tx(neck_x), ty(cy - hsh)),
+            pymupdf.Point(tx(tail_x), ty(cy - hsh)),
+            pymupdf.Point(tx(tail_x), ty(cy + hsh)),
+            pymupdf.Point(tx(neck_x), ty(cy + hsh)),
+            pymupdf.Point(tx(neck_x), ty(cy + hh)),
+        ]
+
+    page.draw_polyline(pts, color=None, fill=color, closePath=True)
+
+
+def build_sign(direction=None):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    suffix = f"_{direction.capitalize()}" if direction else ""
+    pdf_path = os.path.join(OUTPUT_DIR, f"Open_House_Sign_28x18{suffix}_Print.pdf")
+    png_path = os.path.join(OUTPUT_DIR, f"Open_House_Sign_28x18{suffix}.png")
+
     doc = pymupdf.open()
     page = doc.new_page(width=CANVAS_W, height=CANVAS_H)
     register_fonts(page)
@@ -149,6 +191,11 @@ def build_sign():
         lineheight=1.0,
     )
     assert rc_title >= 0, f"Title text overflow: {rc_title}"
+
+    if direction == "left":
+        draw_arrow(page, "left", cx=215.0, cy=212.0, width=200.0, height=130.0, color=IVORY)
+    elif direction == "right":
+        draw_arrow(page, "right", cx=TRIM_W - 215.0, cy=212.0, width=200.0, height=130.0, color=IVORY)
 
     # 3. Middle Signature Card on Ivory Field
     card_x0, card_y0 = 72.0, 412.0
@@ -314,17 +361,18 @@ def build_sign():
 
     draw_crop_marks(page)
 
-    doc.save(PDF_PATH, garbage=4, deflate=True)
+    doc.save(pdf_path, garbage=4, deflate=True)
 
     # Render Trimmed 28" x 18" PNG at 150 DPI (4200 x 2700 px)
     trim_clip = pymupdf.Rect(BLEED, BLEED, BLEED + TRIM_W, BLEED + TRIM_H)
     pix = page.get_pixmap(dpi=150, clip=trim_clip)
-    pix.save(PNG_PATH)
+    pix.save(png_path)
     doc.close()
 
-    print(f"Saved PDF: {PDF_PATH}")
-    print(f"Saved PNG: {PNG_PATH} ({pix.width}x{pix.height} px)")
+    print(f"Saved PDF: {pdf_path}")
+    print(f"Saved PNG: {png_path} ({pix.width}x{pix.height} px)")
 
 
 if __name__ == "__main__":
-    build_sign()
+    for d in [None, "left", "right"]:
+        build_sign(direction=d)
