@@ -35,7 +35,7 @@ TRIM_H = 6.0 * 72.0    # 432.0 pt
 CANVAS_W = TRIM_W + 2 * BLEED  # 1746.0 pt
 CANVAS_H = TRIM_H + 2 * BLEED  # 450.0 pt
 
-SPLIT_X = 1040.0
+SPLIT_X = 820.0
 
 OUTPUT_DIR = "/home/lokesh/Casa-poki/real-estate/output"
 PDF_PATH = os.path.join(OUTPUT_DIR, "Sold_Rider_24x6_Print.pdf")
@@ -83,13 +83,13 @@ def draw_crosshair(page, x, y, size=7.0, color=SILVER_DARK, width=0.8):
 
 def draw_architectural_lintel(page):
     """Etch subtle blueprint grid and threshold arc into the Charcoal field."""
-    for gx in [72.0, 314.0, 556.0, 798.0]:
+    for gx in [64.0, 294.0, 524.0, 754.0]:
         page.draw_line(pymupdf.Point(tx(gx), 0), pymupdf.Point(tx(gx), CANVAS_H), color=CHARCOAL_LIGHT, width=0.6)
     for gy in [96.0, 216.0, 336.0]:
         page.draw_line(pymupdf.Point(0, ty(gy)), pymupdf.Point(tx(SPLIT_X), ty(gy)), color=CHARCOAL_LIGHT, width=0.6)
 
-    # Quarter-arc anchored at bottom-left (72, 390)
-    ox, oy = 72.0, 390.0
+    # Quarter-arc anchored at bottom-left (64, 390)
+    ox, oy = 64.0, 390.0
     for radius in [340.0, 230.0]:
         pts = []
         for i in range(49):
@@ -97,8 +97,8 @@ def draw_architectural_lintel(page):
             pts.append(pymupdf.Point(tx(ox + radius * math.cos(ang)), ty(oy + radius * math.sin(ang))))
         page.draw_polyline(pts, color=CHARCOAL_LIGHT, width=0.7, closePath=False)
 
-    draw_crosshair(page, 72.0, 96.0)
-    draw_crosshair(page, 798.0, 336.0)
+    draw_crosshair(page, 64.0, 96.0)
+    draw_crosshair(page, 754.0, 336.0)
 
 
 def build_rider():
@@ -120,10 +120,10 @@ def build_rider():
         fill=SILVER,
     )
 
-    # 2. Left Charcoal Field: Monumental SOLD
+    # 2. Left Charcoal Field: Monumental SOLD BY
     rc_kicker = add_text(
         page,
-        tr(72, 46, SPLIT_X - 48, 76),
+        tr(64, 44, SPLIT_X - 40, 74),
         "MILESTONE   •   REPRESENTED BY LOKI",
         font="PJS-Bold",
         size=13.0,
@@ -132,89 +132,106 @@ def build_rider():
     )
     rc_sold = add_text(
         page,
-        tr(64, 72, SPLIT_X - 40, 375),
+        tr(58, 66, SPLIT_X - 36, 280),
         "SOLD",
         font="PF-Bold",
-        size=230.0,
+        size=172.0,
         color=IVORY,
         align=0,
         lineheight=1.0,
     )
+    rc_by = add_text(
+        page,
+        tr(62, 236, 220, 345),
+        "BY",
+        font="PF-Bold",
+        size=74.0,
+        color=SILVER,
+        align=0,
+        lineheight=1.0,
+    )
+    # Crisp architectural rule extending from BY toward the datum divider
+    page.draw_line(
+        pymupdf.Point(tx(186), ty(288)),
+        pymupdf.Point(tx(SPLIT_X - 54), ty(288)),
+        color=SILVER,
+        width=2.0,
+    )
     rc_sub = add_text(
         page,
-        tr(72, 368, SPLIT_X - 48, 400),
+        tr(64, 368, SPLIT_X - 40, 400),
         "THINKING OF SELLING?   CALL OR TEXT ANYTIME",
         font="PJS-Semi",
         size=13.0,
         color=SILVER_DARK,
         align=0,
     )
-    assert rc_kicker >= 0 and rc_sold >= 0 and rc_sub >= 0, (
-        f"Left field overflow: {rc_kicker}, {rc_sold}, {rc_sub}"
+    assert rc_kicker >= 0 and rc_sold >= 0 and rc_by >= 0 and rc_sub >= 0, (
+        f"Left field overflow: {rc_kicker}, {rc_sold}, {rc_by}, {rc_sub}"
     )
 
-    # 3. Right Ivory Field: Contact & Co-Branded Logos
-    rx0 = SPLIT_X + 46.0  # 1086.0
-    rx1 = TRIM_W - 210.0  # 1518.0 (leaves room on far right for LC + Real logos)
+    # 3. Right Ivory Field: Larger Name, Phone & Co-Branded Logos
+    rx0 = SPLIT_X + 48.0  # 868.0
+    rx1 = TRIM_W - 216.0  # 1512.0 (644 pt wide for big name & phone!)
 
     rc_name = add_text(
         page,
-        tr(rx0, 56, rx1, 112),
+        tr(rx0, 44, rx1, 124),
         "LOKESH CHANANA",
         font="PF-Bold",
-        size=36.0,
+        size=48.0,
         color=CHARCOAL,
         align=0,
     )
     rc_cred = add_text(
         page,
-        tr(rx0, 102, rx1, 134),
+        tr(rx0, 108, rx1, 140),
         "(LOKI)   •   REALTOR®",
         font="PJS-Bold",
-        size=14.0,
+        size=16.5,
         color=CHARCOAL_LIGHT,
         align=0,
     )
 
     page.draw_line(
         pymupdf.Point(tx(rx0), ty(144)),
-        pymupdf.Point(tx(rx1 - 20), ty(144)),
+        pymupdf.Point(tx(rx1 - 24), ty(144)),
         color=SILVER_LIGHT,
-        width=1.2,
+        width=1.4,
     )
 
     rc_phone = add_text(
         page,
-        tr(rx0, 162, rx1, 240),
+        tr(rx0, 150, rx1, 258),
         "(801) 860-1052",
         font="PJS-Extra",
-        size=46.0,
+        size=66.0,
         color=CHARCOAL,
         align=0,
     )
     rc_web = add_text(
         page,
-        tr(rx0, 228, rx1, 276),
+        tr(rx0, 240, rx1, 294),
         "lokeshchanana.com",
         font="PF-Ital",
-        size=24.0,
+        size=28.0,
         color=CHARCOAL_LIGHT,
         align=0,
     )
 
     page.draw_line(
-        pymupdf.Point(tx(rx0), ty(292)),
-        pymupdf.Point(tx(rx1 - 20), ty(292)),
+        pymupdf.Point(tx(rx0), ty(304)),
+        pymupdf.Point(tx(rx1 - 24), ty(304)),
         color=SILVER_LIGHT,
-        width=1.2,
+        width=1.4,
     )
 
     rc_lic = add_text(
         page,
-        tr(rx0, 322, rx1, 360),
+        tr(rx0, 332, rx1, 372),
         "REAL BROKER LLC   •   WA LIC #26006634",
         font="PJS-Semi",
-        size=13.0,
+        size=14.5,
         color=SILVER_DARK,
         align=0,
     )
