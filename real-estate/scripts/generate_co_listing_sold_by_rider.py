@@ -133,7 +133,7 @@ def build_rider():
     # Top-Left: Co-listing Agent & Name
     rc_role = add_text(
         page,
-        tr(rx0, 38, 1240, 68),
+        tr(rx0, 44, 1240, 72),
         "CO-LISTING AGENT",
         font="PJS-Bold",
         size=15.0,
@@ -142,7 +142,7 @@ def build_rider():
     )
     rc_name = add_text(
         page,
-        tr(rx0, 64, 1260, 158),
+        tr(rx0, 68, 1260, 160),
         "Lokesh Chanana (Loki)",
         font="PF-Bold",
         size=64.0,
@@ -154,21 +154,21 @@ def build_rider():
     # Top-Right: Alpha-masked Lakhani Team + Real Broker LLC logos
     insert_logo(
         page,
-        tr(1310, 34, 1445, 132),
+        tr(1310, 40, 1445, 134),
         os.path.join(PUBLIC_DIR, "lakhani-logo.png"),
         bg_rgb=IVORY_255,
         target_rgb=CHARCOAL_255,
         is_real_logo=False,
     )
     page.draw_line(
-        pymupdf.Point(tx(1465), ty(42)),
-        pymupdf.Point(tx(1465), ty(126)),
+        pymupdf.Point(tx(1465), ty(46)),
+        pymupdf.Point(tx(1465), ty(128)),
         color=SILVER_LIGHT,
         width=1.4,
     )
     insert_logo(
         page,
-        tr(1485, 42, rx1, 124),
+        tr(1485, 46, rx1, 126),
         os.path.join(PUBLIC_DIR, "real-logo.png"),
         bg_rgb=IVORY_255,
         target_rgb=CHARCOAL_255,
@@ -176,7 +176,7 @@ def build_rider():
     )
     rc_brok = add_text(
         page,
-        tr(1280, 136, rx1, 166),
+        tr(1280, 138, rx1, 166),
         "REAL BROKER LLC   •   WA LIC #26006634",
         font="PJS-Semi",
         size=13.0,
@@ -187,8 +187,8 @@ def build_rider():
 
     # Horizontal Divider
     page.draw_line(
-        pymupdf.Point(tx(rx0), ty(174)),
-        pymupdf.Point(tx(rx1), ty(174)),
+        pymupdf.Point(tx(rx0), ty(176)),
+        pymupdf.Point(tx(rx1), ty(176)),
         color=SILVER_LIGHT,
         width=1.5,
     )
@@ -196,21 +196,46 @@ def build_rider():
     # Massive Street-Legible Phone Number
     rc_phone = add_text(
         page,
-        tr(rx0, 186, rx1, 396),
+        tr(rx0, 186, rx1, 392),
         "801.860.1052",
         font="PJS-Extra",
-        size=152.0,
+        size=150.0,
         color=CHARCOAL,
         align=0,
         lineheight=1.0,
     )
     assert rc_phone >= 0, f"Phone overflow: {rc_phone}"
 
-    # Bottom Charcoal Crown Bar (14 pt inside trim + bleed)
-    page.draw_rect(
-        pymupdf.Rect(tx(SPLIT_X), ty(TRIM_H - 14.0), CANVAS_W, CANVAS_H),
-        color=None,
-        fill=CHARCOAL,
+    # Outer 12 pt Charcoal Frame (full bleed around all 4 sides)
+    bw = 12.0
+    page.draw_rect(pymupdf.Rect(0, 0, CANVAS_W, ty(bw)), color=None, fill=CHARCOAL)
+    page.draw_rect(pymupdf.Rect(0, ty(TRIM_H - bw), CANVAS_W, CANVAS_H), color=None, fill=CHARCOAL)
+    page.draw_rect(pymupdf.Rect(0, 0, tx(bw), CANVAS_H), color=None, fill=CHARCOAL)
+    page.draw_rect(pymupdf.Rect(tx(TRIM_W - bw), 0, CANVAS_W, CANVAS_H), color=None, fill=CHARCOAL)
+
+    # Inset Architectural Frame (Silver on Charcoal side, Charcoal on Ivory side)
+    inset = 22.0
+    page.draw_polyline(
+        [
+            pymupdf.Point(tx(SPLIT_X), ty(inset)),
+            pymupdf.Point(tx(inset), ty(inset)),
+            pymupdf.Point(tx(inset), ty(TRIM_H - inset)),
+            pymupdf.Point(tx(SPLIT_X), ty(TRIM_H - inset)),
+        ],
+        color=SILVER,
+        width=2.4,
+        closePath=False,
+    )
+    page.draw_polyline(
+        [
+            pymupdf.Point(tx(SPLIT_X), ty(inset)),
+            pymupdf.Point(tx(TRIM_W - inset), ty(inset)),
+            pymupdf.Point(tx(TRIM_W - inset), ty(TRIM_H - inset)),
+            pymupdf.Point(tx(SPLIT_X), ty(TRIM_H - inset)),
+        ],
+        color=CHARCOAL,
+        width=2.4,
+        closePath=False,
     )
 
     draw_crop_marks(page)
