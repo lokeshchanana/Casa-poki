@@ -898,7 +898,7 @@ OFFICE_PERSONAS = [
     },
     {
         "id": "homeassistant",
-        "name": "Anna",
+        "name": "Hannah Reed",
         "role": "Home Assistant Guardian & Smart Home Engineer",
         "station": "Smart Home & HA Control Pod",
         "avatar": "🏠",

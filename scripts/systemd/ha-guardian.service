@@ -1,5 +1,5 @@
 [Unit]
-Description=Anna — Home Assistant Guardian (Antigravity) Monitoring & Auto-Heal Service
+Description=Hannah Reed — Home Assistant Guardian (Antigravity) Monitoring & Auto-Heal Service
 After=docker.service
 Requires=docker.service
 

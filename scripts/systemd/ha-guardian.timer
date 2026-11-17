@@ -1,5 +1,5 @@
 [Unit]
-Description=Anna — Home Assistant Guardian 5-Minute Monitoring Timer
+Description=Hannah Reed — Home Assistant Guardian 5-Minute Monitoring Timer
 Requires=ha-guardian.service
 
 [Timer]

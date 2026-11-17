@@ -166,9 +166,9 @@ You do not make independent business decisions; your sole mission is to reliably
 - Useless / spam / cold solicitations -> Filtered out and discarded.""",
     },
     "homeassistant": {
-        "name": "Anna",
+        "name": "Hannah Reed",
         "role": "Home Assistant Guardian & Smart Home Engineer",
-        "system_prompt": """You are Anna, Home Assistant Guardian & Smart Home Engineer for Casa-poki, running on Antigravity.
+        "system_prompt": """You are Hannah Reed, Home Assistant Guardian & Smart Home Engineer for Casa-poki, running on Antigravity.
 You monitor Home Assistant hosted at http://192.168.1.251:8123 (https://ha.lokeshchanana.com) and its companion containers (`music-assistant`, `habridge`, `adguardhome-adguardhome-1`).
 You have direct tools to:
 - Run a full Home Assistant health audit (`ha_health_check`): checks API reachability, core RUNNING state, configuration.yaml validity, persistent notifications, broken automations, unavailable critical entities, and companion containers.
@@ -190,9 +190,9 @@ CORE CAPABILITIES & GUIDELINES:
      * CMA / valuation request -> Delegate to Carter Hayes ('cma') for MLS comps.
      * Marketing / post-close drip / promotional request -> Delegate to Maya Reyes ('marketing') or invoke `enroll_buyer_post_close` / `list_post_close_drips` / `process_post_close_drips`.
      * IT / system alerts -> Delegate to Ian Torres ('it') to inspect containers or monitors.
-     * Home Assistant / smart home monitoring or fixes -> Delegate to Anna ('homeassistant') or invoke `ha_health_check`, `ha_fix_issues`, `ha_call_service`.
+     * Home Assistant / smart home monitoring or fixes -> Delegate to Hannah Reed ('homeassistant') or invoke `ha_health_check`, `ha_fix_issues`, `ha_call_service`.
      * Useless email / spam / cold solicitation -> Categorize as spam and discard with zero action.
-   - When the user asks to consult, ask, or assign a task to another specialist (such as Carter Hayes for CMA/valuation, Maya Reyes for marketing, Fiona Banks for finance, Miles Miller for intake, Silas Drake for emails, Ian Torres for IT, Anna for Home Assistant), invoke `delegate_to_agent` with target_agent and task_description.
+   - When the user asks to consult, ask, or assign a task to another specialist (such as Carter Hayes for CMA/valuation, Maya Reyes for marketing, Fiona Banks for finance, Miles Miller for intake, Silas Drake for emails, Ian Torres for IT, Hannah Reed for Home Assistant), invoke `delegate_to_agent` with target_agent and task_description.
    - When the user instructs you to search, view, count, create, update, or delete contacts, tasks, or notes in Twenty CRM, invoke the appropriate CRM tool.
    - For queries like "How many people...", use `search_contacts` with `count_mode: true` and appropriate filters (`can_email`, `phone_blank`, `email_present`).
    - Before answering complex questions or market inquiries, invoke `query_memory` to check the Vector Database for stored insights or past resolutions.
@@ -528,10 +528,10 @@ def detect_message_domain(text: str) -> str:
         return "GENERAL_CONVERSATION"
     t = text.lower()
 
-    # 0. Home Assistant & Smart Home keywords (Anna)
+    # 0. Home Assistant & Smart Home keywords (Hannah Reed)
     ha_kw = [
         "home assistant", "homeassistant", "hass", "ha.lokeshchanana.com",
-        "192.168.1.251", "anna", "smart home", "zigbee", "zwave", "matter",
+        "192.168.1.251", "hannah", "hanna", "hannah reed", "smart home", "zigbee", "zwave", "matter",
         "music assistant", "habridge", "unavailable entities", "monitor ha", "fix ha"
     ]
     if any(k in t for k in ha_kw) or re.search(r"\bha\b", t):

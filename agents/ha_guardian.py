@@ -1,5 +1,5 @@
 """
-Anna — Home Assistant Guardian & Smart Home Engineer (Antigravity-Powered)
+Hannah Reed — Home Assistant Guardian & Smart Home Engineer (Antigravity-Powered)
 Casa-poki Intelligent Agent Hub
 
 Monitors Home Assistant (192.168.1.251:8123 / https://ha.lokeshchanana.com),
@@ -428,7 +428,7 @@ async def heal_ha_issues(
             "create",
             {
                 "notification_id": "ha_guardian_report",
-                "title": "Anna (HA Guardian) Auto-Remediation Report",
+                "title": "Hannah Reed (HA Guardian) Auto-Remediation Report",
                 "message": (
                     f"Detected status `{audit['status']}` and executed:\n"
                     + "\n".join(summary_lines)
@@ -458,9 +458,9 @@ async def heal_ha_issues(
     log_request_flow(
         flow_id=f"ha_heal_{int(now)}",
         source="ha_guardian",
-        title="Anna (HA Guardian) Auto-Remediation",
+        title="Hannah Reed (HA Guardian) Auto-Remediation",
         status="SUCCESS",
-        agents_involved=["Anna"],
+        agents_involved=["Hannah Reed"],
         steps=actions_taken,
         result_summary=summary,
     )
@@ -477,14 +477,14 @@ async def heal_ha_issues(
 
 def _invoke_antigravity_diagnosis(audit: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Invokes Antigravity CLI (/usr/local/bin/agy) as Anna to reason over
+    Invokes Antigravity CLI (/usr/local/bin/agy) as Hannah Reed to reason over
     Home Assistant issues and decide the safest remediation plan.
     """
     if not os.path.exists(AGY_PATH):
         return {"used_antigravity": False, "reason": "agy binary not found", "action": "heal"}
 
     prompt = (
-        "You are Anna, the Home Assistant Guardian Agent running on Antigravity.\n"
+        "You are Hannah Reed, the Home Assistant Guardian Agent running on Antigravity.\n"
         "Review this live Home Assistant health snapshot and decide the safest remediation.\n"
         "Respond ONLY with valid JSON: "
         '{"should_heal": true/false, "allow_restart": false, "target_entities": [...], "reasoning": "..."}\n\n'
@@ -518,7 +518,7 @@ def _invoke_antigravity_diagnosis(audit: Dict[str, Any]) -> Dict[str, Any]:
 async def run_autonomous_monitor(auto_fix: bool = True) -> Dict[str, Any]:
     """
     Entry point for the 5-minute systemd timer.
-    Checks HA health; if issues are detected and auto_fix=True, invokes Anna on
+    Checks HA health; if issues are detected and auto_fix=True, invokes Hannah Reed on
     Antigravity to diagnose and execute safe remediation.
     """
     init_store()
@@ -547,7 +547,7 @@ async def run_autonomous_monitor(auto_fix: bool = True) -> Dict[str, Any]:
         return audit
 
     decision = _invoke_antigravity_diagnosis(audit)
-    logger.info(f"Anna (Antigravity) diagnosis decision: {decision}")
+    logger.info(f"Hannah Reed (Antigravity) diagnosis decision: {decision}")
 
     if decision.get("should_heal", True):
         heal_res = await heal_ha_issues(

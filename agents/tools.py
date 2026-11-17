@@ -363,7 +363,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "delegate_to_agent",
-            "description": "Delegate a task, specialized analysis, or follow-up to another Casa-poki agent persona. Available target agents: 'manager', 'it', 'auditor', 'intake', 'finance', 'marketing', 'cma', 'mailman', 'homeassistant' (Anna).",
+            "description": "Delegate a task, specialized analysis, or follow-up to another Casa-poki agent persona. Available target agents: 'manager', 'it', 'auditor', 'intake', 'finance', 'marketing', 'cma', 'mailman', 'homeassistant' (Hannah Reed).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -784,7 +784,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "ha_health_check",
-            "description": "Anna (Home Assistant Guardian) performs a full diagnostic audit of Home Assistant (192.168.1.251:8123 / ha.lokeshchanana.com), checking API reachability, core state, configuration validity, unavailable critical entities, broken automations, persistent notifications, and companion smart-home containers.",
+            "description": "Hannah Reed (Home Assistant Guardian) performs a full diagnostic audit of Home Assistant (192.168.1.251:8123 / ha.lokeshchanana.com), checking API reachability, core state, configuration validity, unavailable critical entities, broken automations, persistent notifications, and companion smart-home containers.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -800,7 +800,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "ha_fix_issues",
-            "description": "Anna (Home Assistant Guardian) safely diagnoses and auto-fixes detected Home Assistant issues: refreshes unavailable entities, reloads broken automations/integrations, restarts unhealthy companion containers (music-assistant, habridge), and performs a config-validated HA restart only if needed.",
+            "description": "Hannah Reed (Home Assistant Guardian) safely diagnoses and auto-fixes detected Home Assistant issues: refreshes unavailable entities, reloads broken automations/integrations, restarts unhealthy companion containers (music-assistant, habridge), and performs a config-validated HA restart only if needed.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2375,7 +2375,7 @@ async def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         res["duration_ms"] = int((time.time() - start_ts) * 1000)
         return res
 
-    # Home Assistant Guardian (Anna) Handlers
+    # Home Assistant Guardian (Hannah Reed) Handlers
     if name == "ha_health_check":
         from ha_guardian import check_ha_health
 
@@ -2871,7 +2871,7 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
         status = result.get("status", "UNKNOWN")
         icon = "🟢" if status == "HEALTHY" else ("🟡" if status == "DEGRADED" else "🔴")
         lines = [
-            f"### 🏠 Home Assistant Health Audit — Anna ({icon} {status})",
+            f"### 🏠 Home Assistant Health Audit — Hannah Reed ({icon} {status})",
             f"- **Instance:** `{result.get('ha_url', 'http://192.168.1.251:8123')}` ([https://ha.lokeshchanana.com](https://ha.lokeshchanana.com))",
             f"- **HA Version & State:** `{result.get('ha_version', 'unknown')}` (`{result.get('core_state', 'unknown')}`)",
             f"- **Config Valid:** `{result.get('config_valid')}`",
@@ -2891,7 +2891,7 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
         post = result.get("post_status", "UNKNOWN")
         actions = result.get("actions_taken", [])
         lines = [
-            f"### 🛠️ Home Assistant Auto-Remediation — Anna",
+            f"### 🛠️ Home Assistant Auto-Remediation — Hannah Reed",
             f"- **Pre-Fix Status:** `{pre}` → **Post-Fix Status:** `{post}`",
             f"- **Actions Executed:** {len(actions)}",
         ]
@@ -2909,7 +2909,7 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
         svc = result.get("service", args.get("service", ""))
         ok_str = "SUCCESS" if result.get("ok") else f"FAILED: {result.get('error')}"
         return (
-            f"### 🏠 Home Assistant Service Call — Anna\n"
+            f"### 🏠 Home Assistant Service Call — Hannah Reed\n"
             f"- **Service:** `{dom}.{svc}`\n"
             f"- **Result:** {ok_str}"
         )
