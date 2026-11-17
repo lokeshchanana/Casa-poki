@@ -164,12 +164,23 @@
         } catch (e) {}
       })();
     </script>
-    <!-- Google Analytics / Tag Manager -->
-    <script async src="https://www.googletagmanager.com/gtm.js?id=GTM-WHBSVX8C"></script>
+    <!-- Google Analytics / Tag Manager (Production only, or ?gtm_test=1 on dev) -->
     <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
+      (function() {
+        var host = window.location.hostname;
+        var isProd = host === 'lokeshchanana.com' || host === 'www.lokeshchanana.com';
+        var isTest = new URLSearchParams(window.location.search).get('gtm_test') === '1';
+        if (!isProd && !isTest) return;
+
+        window.dataLayer = window.dataLayer || [];
+        window.gtag = function(){window.dataLayer.push(arguments);};
+        window.gtag('js', new Date());
+
+        var s = document.createElement('script');
+        s.async = true;
+        s.src = 'https://www.googletagmanager.com/gtm.js?id=GTM-WHBSVX8C';
+        document.head.appendChild(s);
+      })();
     </script>
   </head>
   <body class="bg-ivory dark:bg-charcoal text-charcoal dark:text-silver font-sans antialiased transition-colors duration-300">
