@@ -12,15 +12,18 @@ export default function CityMarketPage({ citySlug }) {
   const routePath = `/cities/${data.slug}`;
 
   return (
-    <div className="bg-ivory dark:bg-charcoal min-h-screen text-charcoal dark:text-silver transition-colors duration-300">
+    <div className="bg-ivory dark:bg-charcoal min-h-screen pt-28 md:pt-24 text-charcoal dark:text-silver transition-colors duration-300">
       {/* Hero */}
-      <div className="relative pt-32 pb-24 bg-charcoal dark:bg-charcoal-dark border-b border-silver/20 overflow-hidden">
+      <div className="relative py-20 md:py-24 bg-charcoal dark:bg-charcoal-dark border-b border-silver/20 overflow-hidden">
         <div className="absolute inset-0 z-0">
           <img
             src={data.heroImage}
             alt={`${data.city}, WA Real Estate Market`}
-            className="w-full h-full object-cover opacity-20 grayscale"
+            fetchpriority="high"
+            decoding="async"
+            className="w-full h-full object-cover opacity-40 grayscale"
           />
+          <div className="absolute inset-0 bg-gradient-to-b from-charcoal/60 via-charcoal/50 to-charcoal/85" />
         </div>
         <div className="relative z-10 max-w-4xl mx-auto px-4 sm:px-6 text-center">
           <Link
@@ -134,6 +137,8 @@ export default function CityMarketPage({ citySlug }) {
               <img
                 src={data.mapImage}
                 alt={`Map of ${data.city}, ${data.county}`}
+                loading="lazy"
+                decoding="async"
                 className="w-full h-full object-cover"
               />
             </div>

@@ -19,7 +19,7 @@ export default function Header() {
   }, []);
 
   return (
-    <header className={"fixed w-full top-0 z-50 transition-all duration-500 backdrop-blur-md border-b border-silver/20 " + (isScrolled ? "bg-white/95 dark:bg-charcoal-dark/95 py-1 shadow-sm" : "bg-ivory/85 dark:bg-charcoal/80 py-3")}>
+    <header className={"fixed w-full top-0 z-50 transition-all duration-500 backdrop-blur-md border-b " + (isScrolled ? "bg-white/90 dark:bg-charcoal-dark/90 border-silver/20 py-1 shadow-sm" : "bg-ivory/45 dark:bg-charcoal/45 border-transparent py-3")}>
       {/* Mobile Top Bar */}
       <div className="md:hidden bg-charcoal dark:bg-black text-ivory dark:text-silver text-xs py-2 px-4 flex justify-between items-center border-b border-silver/20">
         <a href="tel:8018601052" className="flex items-center gap-2"><Phone className="w-3 h-3"/> (801) 860-1052</a>
