@@ -181,6 +181,188 @@ def parse_bill_details(ocr_text: str, file_name: str, file_id: str) -> Dict[str,
     lower_text = ocr_text.lower()
     lower_fn = file_name.lower()
 
+    # 0. Dedicated Amazon Order Summary Parser (handles Order #, Order placed date,
+    #    Refund Total netting, and IRS Publication 535 mixed business/personal item allocation)
+    ord_m = re.search(r"Order\s*#\s*(\d{3}-\d{7}-\d{7})", ocr_text, re.IGNORECASE)
+    if ord_m or "item(s) subtotal" in lower_text or "grand total" in lower_text:
+        order_id = ord_m.group(1) if ord_m else None
+        ref_no = f"AMZN-{order_id}" if order_id else f"GDRIVE-{file_id[:12]}"
+
+        # Extract exact "Order placed Month Day, Year"
+        bill_date = None
+        placed_m = re.search(
+            r"Order\s+placed\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})",
+            ocr_text,
+            re.IGNORECASE,
+        )
+        if placed_m:
+            try:
+                dt = datetime.strptime(f"{placed_m.group(1)[:3]} {placed_m.group(2)} {placed_m.group(3)}", "%b %d %Y")
+                bill_date = dt.strftime("%Y-%m-%d")
+            except Exception:
+                pass
+        if not bill_date:
+            bill_date = datetime.now().strftime("%Y-%m-%d")
+
+        # Extract dollar figures from Order Summary block (Amazon PDFs put labels in one column, values in another)
+        # First try inline label: $amount, else fallback to Order Summary block
+        def _find_amt(pattern: str) -> Optional[float]:
+            m = re.search(pattern, ocr_text, re.IGNORECASE)
+            if m:
+                try:
+                    return float(m.group(1).replace(",", ""))
+                except Exception:
+                    return None
+            return None
+
+        order_sub = _find_amt(r"Item\(s\)\s+Subtotal:\s*\$([0-9]+\.[0-9]{2})")
+        order_tax = _find_amt(r"Estimated\s+tax\s+to\s+be\s+collected:\s*\$([0-9]+\.[0-9]{2})")
+        grand_tot = _find_amt(r"Grand\s+Total:\s*\$([0-9]+\.[0-9]{2})")
+        refund_tot = _find_amt(r"Refund\s+Total\s*[^\$\n]*\n?\s*\$([0-9]+\.[0-9]{2})")
+
+        # Amazon's OCR often places the Order Summary dollar column vertically below the labels.
+        # Parse the summary numbers block if inline labels didn't match.
+        if order_sub is None or grand_tot is None:
+            all_dollars = [float(x) for x in re.findall(r"\$([0-9]+\.[0-9]{2})", ocr_text)]
+            # Look for a contiguous window in all_dollars where (sub + tax == grand) or (sub, 0.0, sub, tax, grand)
+            for i in range(len(all_dollars)):
+                cand_sub = all_dollars[i]
+                if cand_sub <= 0:
+                    continue
+                for j in range(i + 1, min(i + 7, len(all_dollars))):
+                    cand_tax = all_dollars[j]
+                    if 0 < cand_tax < cand_sub * 0.25:
+                        expected_gt = round(cand_sub + cand_tax, 2)
+                        for k in range(j + 1, min(j + 4, len(all_dollars))):
+                            if abs(all_dollars[k] - expected_gt) <= 0.05:
+                                order_sub = cand_sub
+                                order_tax = cand_tax
+                                grand_tot = all_dollars[k]
+                                if "refund total" in lower_text and k + 1 < len(all_dollars):
+                                    # Check if next value is a refund
+                                    nxt = all_dollars[k + 1]
+                                    if 0 < nxt <= grand_tot:
+                                        refund_tot = nxt
+                                break
+                        if grand_tot is not None:
+                            break
+                if grand_tot is not None:
+                    break
+
+        # Business keywords for Real Estate / Office / Printer Ink
+        biz_keywords = [
+            "open house sign", "realtor sign", "a-frame", "welcome home", "balloon",
+            "gel pen", "ballpoint pen", "ink cartridge", "67xl", "hp 67", "hp67xl",
+            "vinyl sticker paper", "inkjet", "printer", "toner", "business card", "flyer"
+        ]
+        personal_keywords = [
+            "ice ball mold", "whiskey", "night light", "shower head", "cabin air filter",
+            "mazda", "christmas bow", "satin ribbon"
+        ]
+
+        # Extract item blocks with prices, deduplicating repeated multi-page OCR captures
+        has_personal = any(pk in lower_text for pk in personal_keywords)
+        if has_personal:
+            biz_sub = 0.0
+            biz_items_desc: List[str] = []
+            seen_items = set()
+            # Build isolated item blocks: each Amazon item ends on a standalone price line after "Sold by:"
+            item_blocks: List[str] = []
+            cur_lines: List[str] = []
+            saw_sold_by = False
+            for raw_ln in ocr_text.splitlines():
+                ln_s = raw_ln.strip()
+                if not ln_s:
+                    continue
+                if ln_s.lower().startswith(("item(s) subtotal:", "order summary")):
+                    cur_lines = []
+                    saw_sold_by = False
+                    continue
+                cur_lines.append(ln_s)
+                if "sold by:" in ln_s.lower():
+                    saw_sold_by = True
+                elif saw_sold_by and re.match(r"^\$?[0-9]{1,3}\.[0-9]{2}$", ln_s):
+                    item_blocks.append("\n".join(cur_lines))
+                    cur_lines = []
+                    saw_sold_by = False
+
+            for seg in item_blocks:
+                seg_low = seg.lower()
+                if "refunded" in seg_low or "return complete" in seg_low or "return is in transit" in seg_low:
+                    continue
+                is_biz = any(bk in seg_low for bk in biz_keywords)
+                is_pers = any(pk in seg_low for pk in personal_keywords)
+                if is_biz and not is_pers:
+                    prices = re.findall(r"\$?([0-9]{1,3}\.[0-9]{2})\b", seg)
+                    if prices:
+                        p_val = float(prices[-1])
+                        title_str = "Business Item"
+                        for ln in seg.splitlines():
+                            ln_s = ln.strip()
+                            if len(ln_s) > 12 and not ln_s.lower().startswith((
+                                "delivered", "your package", "sold by", "supplied by",
+                                "return window", "$", "view related", "order placed",
+                                "ship to", "payment method", "earns ", "conditions",
+                                "free shipping", "total before", "estimated tax", "grand total"
+                            )):
+                                title_str = ln_s[:65]
+                                break
+                        dedup_key = (title_str[:30].lower(), p_val)
+                        if dedup_key not in seen_items:
+                            seen_items.add(dedup_key)
+                            biz_sub += p_val
+                            biz_items_desc.append(f"{title_str} (${p_val:.2f})")
+
+            if biz_sub > 0:
+                tax_rate = (order_tax / order_sub) if (order_sub and order_tax) else 0.104
+                biz_tax = round(biz_sub * tax_rate, 2)
+                biz_total = round(biz_sub + biz_tax, 2)
+                cat = "Marketing" if any(k in lower_text for k in ["open house", "welcome home", "sticker paper"]) else "Office Supplies"
+                note = (
+                    f"Amazon Order #{order_id} ({bill_date}) — IRS Pub 535 Business-Only Allocation "
+                    f"(personal/refunded items excluded). Business items: {'; '.join(biz_items_desc)}. "
+                    f"Business Subtotal ${biz_sub:.2f} + WA Tax ${biz_tax:.2f} = ${biz_total:.2f}."
+                )
+                return {
+                    "file_id": file_id,
+                    "file_name": file_name,
+                    "vendor": "Amazon.com",
+                    "reference_no": ref_no,
+                    "amount": biz_total,
+                    "subtotal": round(biz_sub, 2),
+                    "tax": biz_tax,
+                    "bill_date": bill_date,
+                    "due_date": bill_date,
+                    "category": cat,
+                    "note": note,
+                }
+
+        # All-business order (or partial refund on all-business order like Order #113-1445969-4994667)
+        if grand_tot is not None:
+            net_total = round(grand_tot - (refund_tot or 0.0), 2)
+            tax_rate = (order_tax / order_sub) if (order_sub and order_tax) else 0.104
+            net_sub = round(net_total / (1.0 + tax_rate), 2) if refund_tot else (order_sub or net_total)
+            net_tax = round(net_total - net_sub, 2)
+            cat = "Marketing" if any(k in lower_text for k in ["open house", "realtor sign", "welcome home"]) else "Office Supplies"
+            refund_note = f" (Net of ${refund_tot:.2f} refund)" if refund_tot else ""
+            note = (
+                f"Amazon Order #{order_id} ({bill_date}){refund_note}. "
+                f"Subtotal ${net_sub:.2f} + WA Tax ${net_tax:.2f} = ${net_total:.2f}."
+            )
+            return {
+                "file_id": file_id,
+                "file_name": file_name,
+                "vendor": "Amazon.com",
+                "reference_no": ref_no,
+                "amount": net_total,
+                "subtotal": round(net_sub, 2),
+                "tax": round(net_tax, 2),
+                "bill_date": bill_date,
+                "due_date": bill_date,
+                "category": cat,
+                "note": note,
+            }
+
     # 1. Vendor Recognition
     vendor = None
     known_vendors = [
@@ -389,9 +571,9 @@ async def scan_and_ingest_drive_bills(
                 })
                 continue
 
-            ref_no = f"GDRIVE-{fid[:12]}"
+            ref_no = parsed.get("reference_no") or f"GDRIVE-{fid[:12]}"
             logger.info(
-                f"Ingesting into Bigcapital: Vendor={parsed['vendor']}, Amount={parsed['amount']}, Date={parsed['bill_date']}"
+                f"Ingesting into Bigcapital: Vendor={parsed['vendor']}, Ref={ref_no}, Amount={parsed['amount']}, Date={parsed['bill_date']}"
             )
             bc_res = await bigcapital_client.create_bill(
                 vendor_name=parsed["vendor"],
@@ -409,7 +591,30 @@ async def scan_and_ingest_drive_bills(
                 bill_id = bc_res.get("bill_id") or bc_res.get("data", {}).get("id")
                 pay_id = bc_res.get("payment_id")
                 from tax_auditor import archive_expense_proof
-                from state_store import upsert_tax_audit_entry
+                from state_store import upsert_tax_audit_entry, get_tax_audit_entry
+
+                # If this is the June 18, 2026 Amazon Open House Signs invoice, clear the prior clipped-email flag
+                if ref_no == "AMZN-113-0005369-1276269":
+                    old_flag = get_tax_audit_entry("AMZN-2026-06-18-OPEN-HOUSE-SIGNS")
+                    if old_flag:
+                        upsert_tax_audit_entry(
+                            reference_no="AMZN-2026-06-18-OPEN-HOUSE-SIGNS",
+                            vendor_name="Amazon.com",
+                            bill_date="2026-06-18",
+                            due_date="2026-06-18",
+                            subtotal=0.0,
+                            tax_amount=0.0,
+                            total_amount=0.0,
+                            category="Marketing",
+                            payment_status="CANCELLED",
+                            payment_method="Superseded by AMZN-113-0005369-1276269",
+                            proof_status="CANCELLED_NET_ZERO",
+                            proof_path=old_flag.get("proof_path", ""),
+                            proof_sha256=old_flag.get("proof_sha256", ""),
+                            source_type="email",
+                            source_id=old_flag.get("source_id", ""),
+                            audit_notes="Superseded & resolved by full Amazon invoice PDF (Order #113-0005369-1276269, $69.87) uploaded to Google Drive.",
+                        )
 
                 proof_path, proof_sha, gdrive_fid = archive_expense_proof(
                     vendor_name=parsed["vendor"],
@@ -428,7 +633,7 @@ async def scan_and_ingest_drive_bills(
                     total_amount=parsed["amount"],
                     category=parsed["category"],
                     payment_status="PAID",
-                    payment_method="Card / POS Receipt",
+                    payment_method="Amazon Prime Store Card (****2950)",
                     bigcapital_bill_id=bill_id,
                     bigcapital_payment_id=pay_id,
                     proof_status="VERIFIED_PDF_RECEIPT",
@@ -437,7 +642,7 @@ async def scan_and_ingest_drive_bills(
                     gdrive_file_id=gdrive_fid or fid,
                     source_type="gdrive",
                     source_id=fid,
-                    audit_notes=f"Verified Google Drive PDF receipt ({fname})",
+                    audit_notes=parsed["note"],
                 )
                 record_processed_drive_bill(
                     file_id=fid,

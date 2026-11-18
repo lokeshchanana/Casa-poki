@@ -288,9 +288,9 @@ async def run_independent_tax_audit(
         pr_path = r.get("proof_path", "")
         notes = r.get("audit_notes", "")
 
-        if p_status == "REFUNDED" or pr_status == "REFUNDED_NET_ZERO":
+        if p_status in ("REFUNDED", "CANCELLED") or pr_status in ("REFUNDED_NET_ZERO", "CANCELLED_NET_ZERO"):
             refunded_items.append(r)
-            # Ensure refunded bill is not active in Bigcapital
+            # Ensure refunded/cancelled bill is not active in Bigcapital
             if ref.lower() in bc_by_ref:
                 bad_b = bc_by_ref[ref.lower()]
                 bad_bid = bad_b.get("id")
@@ -302,14 +302,14 @@ async def run_independent_tax_audit(
                     del_res = await bigcapital_client.delete_bill(bad_bid)
                     if del_res.get("ok"):
                         removed = True
-                        remediations.append(f"Removed refunded Bigcapital Bill #{bad_bid} ({vname}, ${tot:.2f}, Ref={ref}) and linked payment")
+                        remediations.append(f"Removed {p_status.lower()} Bigcapital Bill #{bad_bid} ({vname}, ${tot:.2f}, Ref={ref}) and linked payment")
                 if not removed:
                     findings.append({
                         "severity": "critical",
                         "type": "refunded_bill_active",
                         "reference_no": ref,
                         "vendor": vname,
-                        "message": f"Refunded order {ref} ({vname}, ${tot:.2f}) is still active as Bill #{bad_bid} in Bigcapital!",
+                        "message": f"{p_status.title()} order {ref} ({vname}, ${tot:.2f}) is still active as Bill #{bad_bid} in Bigcapital!",
                     })
             continue
 
