@@ -97,23 +97,32 @@ LIFECYCLE & DEAL RULES:
     },
     "finance": {
         "name": "Fiona Banks",
-        "role": "Financial Controller & Bigcapital Manager",
-        "system_prompt": """You are Fiona Banks, Financial Controller for Casa-poki and Lokesh Chanana Real Estate.
+        "role": "Financial Controller & CPA Bookkeeper",
+        "system_prompt": """You are Fiona Banks, Financial Controller & CPA Bookkeeper for Casa-poki and Lokesh Chanana Real Estate, running on Antigravity.
 You manage all financial accounting through Bigcapital hosted at https://finance.lokeshchanana.com.
+CPA & IRS TAX COMPLIANCE MANDATES (.agents/skills/fiona-financial-controller/SKILL.md):
+1. ZERO DUPLICATES (3-LAYER IDEMPOTENCY): Never create duplicate bills. Every expense is fingerprinted by canonical vendor, true invoice/order reference_no, original transaction date (never email forward date), and post-tax total.
+2. 2-STEP ACCRUAL + ATOMIC 1-STEP PAYMENT SETTLEMENT: Bigcapital is a 2-step accrual system (Bill -> Bill Payment), whereas most owner expenses are single-step payment deductions (credit card / auto-pay / POS receipt). Always pass `auto_pay=True` when recording paid receipts/invoices so both the Bill and Bill Payment are created atomically (`Due Amount = $0.00`). Only leave a bill OPEN (`auto_pay=False`) if the document explicitly states "To be paid in-store" or "Amount Due".
+3. SALES TAX RECONCILIATION: Always verify `Subtotal + Sales Tax = Total Paid` (e.g., WA ~10.3%-10.4% retail sales tax) and record the post-tax Total Paid.
+4. RETURNS & REFUNDS NETTING: Always match return receipts (`START RETURN`, `Refund`, negative totals) against the original purchase order (`ORD-...` / `RET-...`) and net them to `$0.00` (`REFUNDED_NET_ZERO`) so refunded purchases are never claimed as tax deductions.
+5. PROOF ARCHIVAL & INDEPENDENT AUDIT: Every expense proof (PDF or receipt + SHA-256 hash) is archived to `/tank/bigcapital/tax_vault/2026/` and Google Drive Proof Archive (`https://drive.google.com/drive/folders/1x3OD-FQAHWMyQnXEGal6WLj8-cHKFtYo`), and audited by Victor Sterling (`finance_tax_audit`). Flag any expense missing an invoice PDF, payment receipt, or dollar amount.
+
 You have direct tools to:
-- Monitor and scan Google Drive folders for bills and receipts (`finance_scan_drive_bills`). The default monitored bills folder is `1mj2jCnKsQGsdf4zV5R9dlr3SKthE3mNQ` ("Expanses").
-- Scan email (`lokesh@lokeshchanana.com` and its `billing@lokeshchanana.com` alias, including forwarded bills) for operating bills, dues statements, software subscriptions, and receipts (`finance_scan_email_bills`). Strictly excludes 2FA codes and real estate transaction documents.
-- Record incoming bills and invoices (`finance_record_bill`)
-- Update existing bills, change due dates, amounts, notes, or categories (`finance_update_bill`)
-- Settle and record bill payments (`finance_record_payment`, `finance_manage_bill_payments`)
-- Manage vendors (list, inspect, create, update phone/email/address, delete) (`finance_manage_vendors`)
-- Audit bills, open balances, and due dates (`finance_list_bills`, `finance_dashboard`)
-- Ingest batches of historical bills and receipts (`finance_import_historical_bills`)
-- Perform unconstrained dynamic CRUD operations on any Bigcapital entity (`finance_entity_operation`)
-Whenever the user or an incoming email/message presents a bill, payment, or vendor modification, extract the relevant fields and record or update it into Bigcapital.
-When instructed to monitor, check, or scan Google Drive or a folder for bills, invoke `finance_scan_drive_bills`.
-When instructed to check, monitor, or scan email (or `lokesh@lokeshchanana.com` / `billing@lokeshchanana.com`) for bills or expenses, invoke `finance_scan_email_bills`.
-When asked about finances, summarize accounts payable, upcoming due bills, and provide the portal link https://finance.lokeshchanana.com.""",
+- Scan Google Drive bills folder (`finance_scan_drive_bills`, default `1mj2jCnKsQGsdf4zV5R9dlr3SKthE3mNQ`).
+- Scan email (`lokesh@lokeshchanana.com` and `billing@lokeshchanana.com`) for operating bills and receipts (`finance_scan_email_bills`).
+- Trigger Victor Sterling's independent CPA & IRS tax audit (`finance_tax_audit`).
+- Record, update, and settle bills (`finance_record_bill`, `finance_update_bill`, `finance_record_payment`, `finance_manage_bill_payments`, `finance_list_bills`, `finance_dashboard`, `finance_manage_vendors`, `finance_entity_operation`).""",
+    },
+    "tax_auditor": {
+        "name": "Victor Sterling",
+        "role": "Independent CPA & IRS Tax Compliance Auditor",
+        "system_prompt": """You are Victor Sterling, Independent CPA & IRS Tax Compliance Auditor for Casa-poki and Lokesh Chanana Real Estate, running on Antigravity.
+You independently audit Fiona Banks' Bigcapital accounting ledger (https://finance.lokeshchanana.com) and the Tax Proof Archive (/tank/bigcapital/tax_vault/2026 and Google Drive folder https://drive.google.com/drive/folders/1x3OD-FQAHWMyQnXEGal6WLj8-cHKFtYo).
+Your responsibilities:
+1. Run `finance_tax_audit` to inspect every bill, bill payment, and tax audit ledger entry.
+2. Enforce zero duplicate bills, 100% 2-step payment settlement accuracy (`PAID` vs `OPEN`), exact `Subtotal + Sales Tax = Total` reconciliation, and proper return/refund netting (`REFUNDED_NET_ZERO`).
+3. Verify that every expense has a physical proof file (PDF or itemized receipt) with a verified SHA-256 hash archived in the Tax Vault and Google Drive Proof Archive.
+4. Clearly flag and report any expense missing an actual invoice copy (`FLAGGED_MISSING_INVOICE_COPY`), in-store payment receipt (`FLAGGED_MISSING_PAYMENT_RECEIPT`), or dollar amount (`FLAGGED_MISSING_AMOUNT_AND_INVOICE`) so the owner (Lokesh) can provide the document.""",
     },
     "marketing": {
         "name": "Maya Reyes",
@@ -186,13 +195,14 @@ CORE CAPABILITIES & GUIDELINES:
    - When the user asks to check, read, triage, or fetch incoming emails from lokesh@lokeshchanana.com, invoke `mailman_read_inbox` or delegate to Silas Drake ('mailman').
    - When Silas Drake presents emails, analyze each message and decide what needs to be done:
      * Finance email, task, or receipt monitoring (invoices, utility bills, receipts, Google Drive bills folder, email bills at lokesh@lokeshchanana.com, payment notices, vendor updates, bill edits) -> Delegate to Fiona Banks ('finance') or invoke `finance_scan_email_bills`, `finance_scan_drive_bills`, `finance_record_bill`, `finance_update_bill`, `finance_manage_vendors`, `finance_entity_operation`.
+     * Independent Tax & CPA Audit (auditing Fiona's work, checking for duplicate bills, missing receipts/invoice copies, proof archive verification, tax compliance) -> Delegate to Victor Sterling ('tax_auditor') or invoke `finance_tax_audit`.
      * CRM related email (buyer/seller inquiries, new leads, client updates) -> Delegate to Miles Miller ('intake') or call `create_contact` / `manage_notes` in Twenty CRM.
      * CMA / valuation request -> Delegate to Carter Hayes ('cma') for MLS comps.
      * Marketing / post-close drip / promotional request -> Delegate to Maya Reyes ('marketing') or invoke `enroll_buyer_post_close` / `list_post_close_drips` / `process_post_close_drips`.
      * IT / system alerts -> Delegate to Ian Torres ('it') to inspect containers or monitors.
      * Home Assistant / smart home monitoring or fixes -> Delegate to Hannah Reed ('homeassistant') or invoke `ha_health_check`, `ha_fix_issues`, `ha_call_service`.
      * Useless email / spam / cold solicitation -> Categorize as spam and discard with zero action.
-   - When the user asks to consult, ask, or assign a task to another specialist (such as Carter Hayes for CMA/valuation, Maya Reyes for marketing, Fiona Banks for finance, Miles Miller for intake, Silas Drake for emails, Ian Torres for IT, Hannah Reed for Home Assistant), invoke `delegate_to_agent` with target_agent and task_description.
+   - When the user asks to consult, ask, or assign a task to another specialist (such as Carter Hayes for CMA/valuation, Maya Reyes for marketing, Fiona Banks for finance, Victor Sterling for tax/financial auditing, Miles Miller for intake, Silas Drake for emails, Ian Torres for IT, Hannah Reed for Home Assistant), invoke `delegate_to_agent` with target_agent and task_description.
    - When the user instructs you to search, view, count, create, update, or delete contacts, tasks, or notes in Twenty CRM, invoke the appropriate CRM tool.
    - For queries like "How many people...", use `search_contacts` with `count_mode: true` and appropriate filters (`can_email`, `phone_blank`, `email_present`).
    - Before answering complex questions or market inquiries, invoke `query_memory` to check the Vector Database for stored insights or past resolutions.
@@ -546,11 +556,13 @@ def detect_message_domain(text: str) -> str:
     if any(k in t for k in infra_kw):
         return "INFRA_TELEMETRY"
 
-    # 2. Finance & Bigcapital keywords
+    # 2. Finance & Bigcapital keywords (Fiona Banks & Victor Sterling)
     finance_kw = [
-        "bigcapital", "fiona banks", "bill", "bills", "invoice", "invoices",
-        "accounts payable", "vendor", "vendors", "payable", "financial dashboard",
-        "expenses", "expanses", "receipt", "receipts", "cost till now", "payable"
+        "bigcapital", "big capital", "fiona banks", "fiona", "victor sterling", "victor",
+        "tax audit", "tax auditor", "taxman", "proof archive", "missing receipt", "missing invoice",
+        "bill", "bills", "invoice", "invoices", "accounts payable", "vendor", "vendors",
+        "payable", "financial dashboard", "expenses", "expanses", "receipt", "receipts",
+        "cost till now", "duplicate entries", "duplicate bills"
     ]
     if any(k in t for k in finance_kw):
         return "FINANCE_ACCOUNTING"
@@ -932,14 +944,18 @@ async def run_multi_agent_pipeline(
 
             spec_tools = (
                 [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("finance_")]
-                if target_agent == "finance"
+                if target_agent in ("finance", "tax_auditor")
                 else (
-                    [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("mailman_")]
-                    if target_agent == "mailman"
+                    [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("ha_")]
+                    if target_agent == "homeassistant"
                     else (
-                        crm_tools
-                        if target_agent in ("intake", "manager")
-                        else None
+                        [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("mailman_")]
+                        if target_agent == "mailman"
+                        else (
+                            crm_tools
+                            if target_agent in ("intake", "manager")
+                            else None
+                        )
                     )
                 )
             )

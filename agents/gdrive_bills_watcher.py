@@ -235,10 +235,15 @@ def parse_bill_details(ocr_text: str, file_name: str, file_id: str) -> Dict[str,
         except Exception:
             pass
 
-    tax_match = re.search(r"(?:sales\s+)?ta[xk]\s*[:\.]?\s*(?:\d+(?:\.\d+)?%)?\s*\$?([0-9]+[\.,][0-9]{2})", ocr_text, re.IGNORECASE)
+    tax_match = re.search(r"(?:sales\s+)?ta[xk]\s*[:\.]?\s*(?:(\d+(?:\.\d+)?)%)?\s*\$?([0-9]+[\.,][0-9]{2})", ocr_text, re.IGNORECASE)
     if tax_match:
         try:
-            tax = float(tax_match.group(1).replace(",", "."))
+            tax = float(tax_match.group(2).replace(",", "."))
+            if subtotal is not None and tax_match.group(1):
+                rate_pct = float(tax_match.group(1))
+                expected_tax = round(subtotal * (rate_pct / 100.0), 2)
+                if abs(tax - expected_tax) <= 0.05:
+                    tax = expected_tax
         except Exception:
             pass
 
@@ -248,7 +253,7 @@ def parse_bill_details(ocr_text: str, file_name: str, file_id: str) -> Dict[str,
         total = calc_total
 
     if total is None:
-        tot_matches = re.findall(r"(?:total|amount due|balance due)\s*[:\.]?\s*\$?([0-9]+[\.,][0-9]{2})", ocr_text, re.IGNORECASE)
+        tot_matches = re.findall(r"\b(?:total|amount due|balance due)\b\s*[:\.]?\s*\$?([0-9]+[\.,][0-9]{2})", ocr_text, re.IGNORECASE)
         if tot_matches:
             try:
                 total = float(tot_matches[-1].replace(",", "."))
@@ -384,6 +389,7 @@ async def scan_and_ingest_drive_bills(
                 })
                 continue
 
+            ref_no = f"GDRIVE-{fid[:12]}"
             logger.info(
                 f"Ingesting into Bigcapital: Vendor={parsed['vendor']}, Amount={parsed['amount']}, Date={parsed['bill_date']}"
             )
@@ -393,12 +399,46 @@ async def scan_and_ingest_drive_bills(
                 due_date=parsed["due_date"],
                 bill_date=parsed["bill_date"],
                 note=parsed["note"],
-                reference_no=f"GDRIVE-{fid[:12]}",
+                reference_no=ref_no,
                 category=parsed["category"],
+                auto_pay=True,
+                payment_date=parsed["bill_date"],
             )
 
             if bc_res.get("ok"):
                 bill_id = bc_res.get("bill_id") or bc_res.get("data", {}).get("id")
+                pay_id = bc_res.get("payment_id")
+                from tax_auditor import archive_expense_proof
+                from state_store import upsert_tax_audit_entry
+
+                proof_path, proof_sha, gdrive_fid = archive_expense_proof(
+                    vendor_name=parsed["vendor"],
+                    reference_no=ref_no,
+                    bill_date=parsed["bill_date"],
+                    content_bytes=file_bytes,
+                    ext=".pdf",
+                )
+                upsert_tax_audit_entry(
+                    reference_no=ref_no,
+                    vendor_name=parsed["vendor"],
+                    bill_date=parsed["bill_date"],
+                    due_date=parsed["due_date"],
+                    subtotal=parsed.get("subtotal") or parsed["amount"],
+                    tax_amount=parsed.get("tax") or 0.0,
+                    total_amount=parsed["amount"],
+                    category=parsed["category"],
+                    payment_status="PAID",
+                    payment_method="Card / POS Receipt",
+                    bigcapital_bill_id=bill_id,
+                    bigcapital_payment_id=pay_id,
+                    proof_status="VERIFIED_PDF_RECEIPT",
+                    proof_path=proof_path,
+                    proof_sha256=proof_sha,
+                    gdrive_file_id=gdrive_fid or fid,
+                    source_type="gdrive",
+                    source_id=fid,
+                    audit_notes=f"Verified Google Drive PDF receipt ({fname})",
+                )
                 record_processed_drive_bill(
                     file_id=fid,
                     file_name=fname,
@@ -407,7 +447,7 @@ async def scan_and_ingest_drive_bills(
                     bill_date=parsed["bill_date"],
                     bill_id=bill_id,
                     status="PROCESSED",
-                    details=f"Bigcapital Bill ID: {bill_id}, Note: {parsed['note']}",
+                    details=f"Bigcapital Bill ID: {bill_id}, Payment ID: {pay_id}, Note: {parsed['note']}",
                 )
                 new_bills.append({
                     "file_id": fid,

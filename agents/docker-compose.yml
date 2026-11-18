@@ -22,6 +22,7 @@ services:
     volumes:
       - /tank/n8n:/tank/n8n:ro
       - /tank/monitor:/tank/monitor:ro
+      - /tank/bigcapital/tax_vault:/tank/bigcapital/tax_vault
       - /var/run/docker.sock:/var/run/docker.sock
       - .:/app
       - ./data:/app/data

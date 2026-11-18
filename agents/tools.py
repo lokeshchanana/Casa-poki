@@ -363,13 +363,13 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "delegate_to_agent",
-            "description": "Delegate a task, specialized analysis, or follow-up to another Casa-poki agent persona. Available target agents: 'manager', 'it', 'auditor', 'intake', 'finance', 'marketing', 'cma', 'mailman', 'homeassistant' (Hannah Reed).",
+            "description": "Delegate a task, specialized analysis, or follow-up to another Casa-poki agent persona. Available target agents: 'manager', 'it', 'auditor', 'intake', 'finance' (Fiona Banks), 'tax_auditor' (Victor Sterling - Independent CPA & Tax Compliance Auditor), 'marketing', 'cma', 'mailman', 'homeassistant' (Hannah Reed).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "target_agent": {
                         "type": "string",
-                        "enum": ["manager", "it", "auditor", "intake", "finance", "marketing", "cma", "mailman", "homeassistant"],
+                        "enum": ["manager", "it", "auditor", "intake", "finance", "tax_auditor", "marketing", "cma", "mailman", "homeassistant"],
                         "description": "The specialist agent to delegate this task to",
                     },
                     "task_description": {
@@ -467,6 +467,10 @@ TOOL_SCHEMAS = [
                     "note": {
                         "type": "string",
                         "description": "Description, items breakdown, or payment instructions",
+                    },
+                    "auto_pay": {
+                        "type": "boolean",
+                        "description": "Set to true if the bill was already paid/deducted (single-step payment deduction) so Bigcapital creates both the Bill and Bill Payment atomically.",
                     },
                 },
                 "required": ["vendor_name", "amount"],
@@ -764,7 +768,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "finance_scan_drive_bills",
-            "description": "Scans the designated Google Drive folder for bills and receipts, performs OCR on PDF and image documents, extracts vendor, amount, date, and category, and ingests new bills into Bigcapital accounting with deduplication.",
+            "description": "Scans the designated Google Drive folder for bills and receipts, performs OCR on PDF and image documents, extracts vendor, amount (reconciling Subtotal + Sales Tax = Total), date, and category, archives proof to the Tax Vault (/tank/bigcapital/tax_vault/2026 & Google Drive folder 1x3OD-FQAHWMyQnXEGal6WLj8-cHKFtYo), and ingests new bills into Bigcapital accounting with atomic payment settlement and deduplication.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -775,6 +779,26 @@ TOOL_SCHEMAS = [
                     "force_reprocess": {
                         "type": "boolean",
                         "description": "Set to true to reprocess files even if they were already recorded in the database. Defaults to false.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "finance_tax_audit",
+            "description": "Victor Sterling (Independent CPA & IRS Tax Compliance Auditor) performs a full forensic tax audit of Fiona Banks' Bigcapital ledger and the Proof Archive (/tank/bigcapital/tax_vault/2026 & Google Drive folder 1x3OD-FQAHWMyQnXEGal6WLj8-cHKFtYo). Verifies zero duplicate invoices, 2-step accrual + payment settlement completeness, Subtotal + Sales Tax = Total reconciliation, return/refund netting, and physical proof presence (PDF/receipt + SHA-256 hash). Lists any flagged items missing invoice copies or payment receipts.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "auto_fix_settlements": {
+                        "type": "boolean",
+                        "description": "Automatically settle paid bills that were erroneously left open (default true).",
+                    },
+                    "auto_remove_duplicates": {
+                        "type": "boolean",
+                        "description": "Automatically remove duplicate bills sharing the same reference_no (default true).",
                     },
                 },
             },
@@ -2301,6 +2325,7 @@ async def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             category=args.get("category"),
             reference_no=args.get("reference_no"),
             note=args.get("note"),
+            auto_pay=bool(args.get("auto_pay", False)),
         )
         res["duration_ms"] = int((time.time() - start_ts) * 1000)
         return res
@@ -2372,6 +2397,18 @@ async def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         limit = args.get("limit", 50)
         force_reprocess = args.get("force_reprocess", False)
         res = await scan_and_ingest_email_bills(limit=limit, force_reprocess=force_reprocess)
+        res["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return res
+
+    if name == "finance_tax_audit":
+        from tax_auditor import run_independent_tax_audit
+
+        auto_fix = bool(args.get("auto_fix_settlements", True))
+        auto_rem = bool(args.get("auto_remove_duplicates", True))
+        res = await run_independent_tax_audit(
+            auto_fix_settlements=auto_fix,
+            auto_remove_duplicates=auto_rem,
+        )
         res["duration_ms"] = int((time.time() - start_ts) * 1000)
         return res
 
@@ -2826,11 +2863,12 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
             lines.append(f"- **Errors/Flagged:** {err_cnt}")
         new_bills = result.get("new_bills", [])
         if new_bills:
-            lines.append("\n**Newly Ingested Bills into Bigcapital:**")
+            lines.append("\n**Newly Ingested & Auto-Settled Bills into Bigcapital:**")
             for b in new_bills:
                 lines.append(
                     f"- **{b.get('vendor')}**: ${b.get('amount', 0.0):,.2f} "
-                    f"(Date: {b.get('bill_date')}, Category: `{b.get('category')}`, File: `{b.get('file_name')}`)"
+                    f"(Subtotal: ${b.get('subtotal', 0.0):,.2f} + Tax: ${b.get('tax', 0.0):,.2f}, "
+                    f"Date: `{b.get('bill_date')}`, Ref: `{b.get('reference_no')}`, Proof: `{b.get('proof_path')}`)"
                 )
         if already_cnt > 0 and not new_bills:
             lines.append("\n*All scanned receipts in this folder have already been recorded into Bigcapital.*")
@@ -2845,7 +2883,7 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
         err_cnt = result.get("error_count", 0)
         account = result.get("account", "lokesh@lokeshchanana.com")
         lines = [
-            f"### 📬 Email Bills Scanner — Fiona Banks & Silas Drake",
+            f"### 📬 Email Bills Scanner — Fiona Banks & Victor Sterling (Independent Tax Auditor)",
             f"- **Mailbox Scanned:** `{account}`",
             f"- **Candidate Emails Evaluated:** {scanned}",
             f"- **Newly Ingested Operating Bills:** {new_cnt}",
@@ -2860,11 +2898,78 @@ def format_tool_result(tool_name: str, result: Dict[str, Any], args: Dict[str, A
             for b in new_bills:
                 lines.append(
                     f"- **{b.get('vendor')}**: ${b.get('amount', 0.0):,.2f} "
-                    f"(Due: {b.get('due_date')}, Ref: `{b.get('reference_no')}`, Category: `{b.get('category')}`)"
+                    f"(Date: `{b.get('bill_date')}`, Ref: `{b.get('reference_no')}`, "
+                    f"Settlement: `{b.get('payment_status')}`, Audit: `{b.get('audit_status')}`)"
                 )
+        netted = result.get("netted_returns", [])
+        if netted:
+            lines.append("\n**🔄 Returns & Refunds Reconciled (Net $0.00 Tax Impact):**")
+            for r in netted:
+                lines.append(
+                    f"- **{r.get('vendor')}** (`{r.get('reference_no')}`): Refund `-${abs(r.get('refund_amount', 0)):,.2f}` "
+                    f"on `{r.get('return_date')}` netted against original order `{r.get('original_reference_no')}` (`{r.get('action')}`)"
+                )
+        flagged = result.get("flagged_missing_proof", [])
+        if flagged:
+            lines.append("\n**🚩 Action Required — Expenses Flagged by Victor Sterling (Missing Proof):**")
+            for f in flagged:
+                amt_str = f"${float(f.get('amount') or 0):,.2f}" if f.get("amount") else "Amount Missing"
+                lines.append(
+                    f"- **{f.get('vendor')}** (`{f.get('reference_no')}`, Date: `{f.get('bill_date')}`, {amt_str}) — "
+                    f"**`{f.get('audit_status')}`**: {f.get('missing_reason')}"
+                )
+        v_audit = result.get("victor_sterling_audit") or {}
+        if v_audit:
+            lines.append(
+                f"\n**⚖️ Victor Sterling CPA Audit Verdict:** `{v_audit.get('audit_status')}` "
+                f"(Verified Proofs: `{v_audit.get('verified_proof_count', 0)}`, "
+                f"Flagged: `{v_audit.get('flagged_missing_proof_count', 0)}`, "
+                f"Duplicate Groups: `{v_audit.get('duplicate_groups_found', 0)}`)"
+            )
         if already_cnt > 0 and not new_bills:
             lines.append("\n*All scanned operating bills in this mailbox have already been recorded into Bigcapital.*")
+        lines.append(f"- **Proof Archive (Google Drive):** [https://drive.google.com/drive/folders/1x3OD-FQAHWMyQnXEGal6WLj8-cHKFtYo](https://drive.google.com/drive/folders/1x3OD-FQAHWMyQnXEGal6WLj8-cHKFtYo)")
         lines.append(f"- **Accounting Portal:** [https://finance.lokeshchanana.com](https://finance.lokeshchanana.com)")
+        return "\n".join(lines)
+
+    if tool_name == "finance_tax_audit":
+        status = result.get("audit_status", "PASS")
+        icon = "🟢" if status == "PASS" else ("🟡" if status == "PASS_WITH_WARNINGS" else "🔴")
+        lines = [
+            f"### ⚖️ Independent CPA & IRS Tax Audit — Victor Sterling ({icon} `{status}`)",
+            f"- **Active Bigcapital Bills Audited:** `{result.get('active_bigcapital_bills_count', 0)}`",
+            f"- **Verified Deductions:** `{result.get('verified_count', 0)}` bills (**${float(result.get('total_verified_deductions', 0)):,.2f} USD**)",
+            f"- **Flagged Missing Proof Items:** `{result.get('flagged_count', 0)}` (**${float(result.get('total_flagged_amount', 0)):,.2f} USD**)",
+            f"- **Returns / Refunds Netted ($0.00 Net):** `{result.get('refunded_net_zero_count', 0)}`",
+            f"- **Local ZFS Proof Vault:** `{result.get('local_tax_vault', '/tank/bigcapital/tax_vault')}`",
+            f"- **Google Drive Proof Archive:** [{result.get('gdrive_archive_folder')}]({result.get('gdrive_archive_folder')})",
+        ]
+        rems = result.get("remediations_executed") or []
+        if rems:
+            lines.append("\n#### 🛠️ Auto-Remediations Executed")
+            for rm in rems:
+                lines.append(f"- {rm}")
+        netted = result.get("refunded_items") or []
+        if netted:
+            lines.append("\n#### 🔄 Reconciled Returns & Refunds (`REFUNDED_NET_ZERO`)")
+            for n in netted:
+                lines.append(
+                    f"- **{n.get('vendor_name')}** (`{n.get('reference_no')}`, Date: `{n.get('bill_date')}`): "
+                    f"${float(n.get('total_amount', 0)):,.2f} — {n.get('audit_notes')}"
+                )
+        flagged = result.get("flagged_items") or []
+        if flagged:
+            lines.append("\n#### 🚩 Action Required — Missing Tax Substantiation (Please Provide to Clear Flag)")
+            lines.append("| Date | Vendor | Reference | Amount | Status | What Is Needed |")
+            lines.append("|---|---|---|---|---|---|")
+            for f in flagged:
+                amt = float(f.get("total_amount", 0) or 0)
+                amt_str = f"${amt:,.2f}" if amt > 0 else "TBD (Clipped)"
+                lines.append(
+                    f"| `{f.get('bill_date')}` | **{f.get('vendor_name')}** | `{f.get('reference_no')}` | "
+                    f"**{amt_str}** | `{f.get('proof_status')}` | {f.get('audit_notes')} |"
+                )
+        lines.append(f"\n[Open Bigcapital Accounting Portal](https://finance.lokeshchanana.com)")
         return "\n".join(lines)
 
     if tool_name == "ha_health_check":

@@ -250,6 +250,53 @@ def init_store() -> None:
         """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tax_audit_ledger (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reference_no TEXT UNIQUE NOT NULL,
+            vendor_name TEXT NOT NULL,
+            bill_date TEXT NOT NULL,
+            due_date TEXT,
+            subtotal REAL DEFAULT 0.0,
+            tax_amount REAL DEFAULT 0.0,
+            total_amount REAL DEFAULT 0.0,
+            category TEXT,
+            payment_status TEXT NOT NULL,
+            payment_method TEXT,
+            bigcapital_bill_id INTEGER,
+            bigcapital_payment_id INTEGER,
+            proof_status TEXT NOT NULL,
+            proof_path TEXT,
+            proof_sha256 TEXT,
+            gdrive_file_id TEXT,
+            gdrive_folder_id TEXT,
+            source_type TEXT,
+            source_id TEXT,
+            audit_notes TEXT,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tax_audit_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            auditor_name TEXT NOT NULL,
+            audit_status TEXT NOT NULL,
+            total_bills_checked INTEGER DEFAULT 0,
+            verified_count INTEGER DEFAULT 0,
+            flagged_count INTEGER DEFAULT 0,
+            duplicates_found INTEGER DEFAULT 0,
+            unsettled_paid_found INTEGER DEFAULT 0,
+            findings_json TEXT,
+            summary TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+
     conn.commit()
     conn.close()
 
@@ -905,6 +952,15 @@ OFFICE_PERSONAS = [
         "color": "cyan",
         "default_activity": "Monitoring Home Assistant (192.168.1.251) & auto-healing entities",
     },
+    {
+        "id": "tax_auditor",
+        "name": "Victor Sterling",
+        "role": "Independent CPA & IRS Tax Compliance Auditor",
+        "station": "Tax & Forensic Audit Desk",
+        "avatar": "⚖️",
+        "color": "amber",
+        "default_activity": "Auditing Fiona's Bigcapital ledger & verifying IRS proof archive",
+    },
 ]
 
 
@@ -1405,6 +1461,186 @@ def list_ha_health_logs(limit: int = 20) -> List[Dict[str, Any]]:
     rows = cur.fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_processed_email_bill(message_id: str) -> Optional[Dict[str, Any]]:
+    """Returns an existing processed_email_bills row by message_id."""
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM processed_email_bills WHERE message_id = ?", (message_id,))
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_processed_drive_bill(file_id: str) -> Optional[Dict[str, Any]]:
+    """Returns an existing processed_drive_bills row by file_id."""
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM processed_drive_bills WHERE file_id = ?", (file_id,))
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def upsert_tax_audit_entry(
+    reference_no: str,
+    vendor_name: str,
+    bill_date: str,
+    due_date: Optional[str] = None,
+    subtotal: float = 0.0,
+    tax_amount: float = 0.0,
+    total_amount: float = 0.0,
+    category: str = "General Expense",
+    payment_status: str = "PAID",
+    payment_method: str = "",
+    bigcapital_bill_id: Optional[int] = None,
+    bigcapital_payment_id: Optional[int] = None,
+    proof_status: str = "VERIFIED_RECEIPT",
+    proof_path: str = "",
+    proof_sha256: str = "",
+    gdrive_file_id: str = "",
+    gdrive_folder_id: str = "1x3OD-FQAHWMyQnXEGal6WLj8-cHKFtYo",
+    source_type: str = "email",
+    source_id: str = "",
+    audit_notes: str = "",
+) -> int:
+    """Upserts a canonical expense/audit record into tax_audit_ledger."""
+    init_store()
+    now = datetime.utcnow().isoformat() + "Z"
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO tax_audit_ledger (
+            reference_no, vendor_name, bill_date, due_date, subtotal, tax_amount,
+            total_amount, category, payment_status, payment_method,
+            bigcapital_bill_id, bigcapital_payment_id, proof_status, proof_path,
+            proof_sha256, gdrive_file_id, gdrive_folder_id, source_type,
+            source_id, audit_notes, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(reference_no) DO UPDATE SET
+            vendor_name = excluded.vendor_name,
+            bill_date = excluded.bill_date,
+            due_date = excluded.due_date,
+            subtotal = excluded.subtotal,
+            tax_amount = excluded.tax_amount,
+            total_amount = excluded.total_amount,
+            category = excluded.category,
+            payment_status = excluded.payment_status,
+            payment_method = excluded.payment_method,
+            bigcapital_bill_id = COALESCE(excluded.bigcapital_bill_id, tax_audit_ledger.bigcapital_bill_id),
+            bigcapital_payment_id = COALESCE(excluded.bigcapital_payment_id, tax_audit_ledger.bigcapital_payment_id),
+            proof_status = excluded.proof_status,
+            proof_path = CASE WHEN excluded.proof_path != '' THEN excluded.proof_path ELSE tax_audit_ledger.proof_path END,
+            proof_sha256 = CASE WHEN excluded.proof_sha256 != '' THEN excluded.proof_sha256 ELSE tax_audit_ledger.proof_sha256 END,
+            gdrive_file_id = CASE WHEN excluded.gdrive_file_id != '' THEN excluded.gdrive_file_id ELSE tax_audit_ledger.gdrive_file_id END,
+            gdrive_folder_id = excluded.gdrive_folder_id,
+            source_type = excluded.source_type,
+            source_id = excluded.source_id,
+            audit_notes = excluded.audit_notes,
+            updated_at = excluded.updated_at
+        """,
+        (
+            reference_no,
+            vendor_name,
+            bill_date,
+            due_date or bill_date,
+            round(float(subtotal or 0.0), 2),
+            round(float(tax_amount or 0.0), 2),
+            round(float(total_amount or 0.0), 2),
+            category,
+            payment_status,
+            payment_method,
+            bigcapital_bill_id,
+            bigcapital_payment_id,
+            proof_status,
+            proof_path,
+            proof_sha256,
+            gdrive_file_id,
+            gdrive_folder_id,
+            source_type,
+            source_id,
+            audit_notes,
+            now,
+        ),
+    )
+    row_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return row_id
+
+
+def get_tax_audit_entry(reference_no: str) -> Optional[Dict[str, Any]]:
+    """Fetches a tax_audit_ledger entry by canonical reference_no."""
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM tax_audit_ledger WHERE reference_no = ?", (reference_no,))
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_tax_audit_ledger(limit: int = 200) -> List[Dict[str, Any]]:
+    """Lists all entries in tax_audit_ledger ordered by bill_date DESC."""
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM tax_audit_ledger ORDER BY bill_date DESC, id DESC LIMIT ?", (limit,))
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def log_tax_audit_report(
+    auditor_name: str,
+    audit_status: str,
+    total_bills_checked: int,
+    verified_count: int,
+    flagged_count: int,
+    duplicates_found: int,
+    unsettled_paid_found: int,
+    findings: List[Dict[str, Any]],
+    summary: str,
+) -> int:
+    """Logs an independent CPA/TaxMan audit report from Victor Sterling."""
+    init_store()
+    now = datetime.utcnow().isoformat() + "Z"
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO tax_audit_reports (
+            auditor_name, audit_status, total_bills_checked, verified_count,
+            flagged_count, duplicates_found, unsettled_paid_found,
+            findings_json, summary, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            auditor_name,
+            audit_status,
+            total_bills_checked,
+            verified_count,
+            flagged_count,
+            duplicates_found,
+            unsettled_paid_found,
+            json.dumps(findings),
+            summary,
+            now,
+        ),
+    )
+    row_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return row_id
+
 
 
 

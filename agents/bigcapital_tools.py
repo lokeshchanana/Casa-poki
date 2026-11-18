@@ -177,24 +177,88 @@ class BigcapitalClient:
         category: Optional[str] = None,
         cost_account_id: int = 1020,  # Default: Office expenses
         is_open: bool = True,
+        auto_pay: bool = False,
+        payment_date: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Record an incoming bill in Bigcapital."""
+        """Record an incoming bill in Bigcapital with strict idempotency and optional 1-step atomic payment settlement."""
         # 1. Resolve or create vendor
         vendor_res = await self.get_or_create_vendor(vendor_name)
         if not vendor_res.get("ok"):
             return {"ok": False, "error": f"Failed to resolve vendor '{vendor_name}': {vendor_res.get('error')}"}
         vendor_id = vendor_res["vendor_id"]
 
-        # 2. Resolve default item id
-        item_id = await self.get_default_item_id()
-
-        # 3. Dates
+        # 2. Dates
         today_str = datetime.now().strftime("%Y-%m-%d")
         b_date = bill_date or today_str
         d_date = due_date or b_date
+        clean_ref = (reference_no or "").strip()
+
+        # 3. Idempotency / Anti-Duplication Guardrail against live Bigcapital ledger
+        existing_res = await self.list_bills(limit=200)
+        if existing_res.get("ok"):
+            for eb in existing_res.get("bills", []):
+                eb_id = eb.get("id")
+                eb_ref = (eb.get("reference_no") or eb.get("referenceNo") or "").strip()
+                eb_vid = eb.get("vendor_id") or (eb.get("vendor") or {}).get("id")
+                eb_date = eb.get("bill_date") or eb.get("billDate")
+                eb_tot = round(float(eb.get("total") or eb.get("amount") or 0.0), 2)
+                eb_due = round(float(eb.get("due_amount") or 0.0), 2)
+
+                ref_match = bool(
+                    clean_ref
+                    and not clean_ref.startswith("BILL-")
+                    and eb_ref.lower() == clean_ref.lower()
+                )
+                tuple_match = bool(
+                    not clean_ref
+                    and eb_vid == vendor_id
+                    and eb_date == b_date
+                    and eb_tot == round(float(amount), 2)
+                )
+
+                if ref_match or tuple_match:
+                    logger.info(f"Idempotency match: Bill #{eb_id} already exists for {vendor_name} (Ref={eb_ref}). Updating/returning existing bill.")
+                    if eb_tot != round(float(amount), 2) or eb_date != b_date:
+                        await self.update_bill(
+                            bill_id=eb_id,
+                            vendor_name=vendor_name,
+                            amount=float(amount),
+                            bill_date=b_date,
+                            due_date=d_date,
+                            reference_no=clean_ref or eb_ref,
+                            note=note,
+                            category=category,
+                        )
+                    payment_id = None
+                    if auto_pay and eb_due > 0:
+                        pay_res = await self.record_bill_payment(
+                            bill_id=eb_id,
+                            amount=round(float(amount), 2),
+                            payment_date=payment_date or b_date,
+                            statement=f"Auto-settled 1-step payment for {clean_ref or eb_ref} ({vendor_name})",
+                        )
+                        if pay_res.get("ok"):
+                            payment_id = pay_res.get("payment_id")
+                            eb_due = 0.0
+                    return {
+                        "ok": True,
+                        "already_exists": True,
+                        "bill_id": eb_id,
+                        "payment_id": payment_id,
+                        "vendor_name": vendor_name,
+                        "vendor_id": vendor_id,
+                        "amount": float(amount),
+                        "bill_date": b_date,
+                        "due_date": d_date,
+                        "status": "PAID" if (auto_pay or eb_due == 0) else "OPEN",
+                        "message": f"Bill #{eb_id} already exists for {vendor_name} (${amount:,.2f}) — deduplicated.",
+                    }
+
+        # 4. Resolve default item id
+        item_id = await self.get_default_item_id()
         bill_num = f"BILL-{datetime.now().strftime('%Y%m%d')}-{int(datetime.now().timestamp()*1000)%100000:05d}"
 
-        # 4. Line items
+        # 5. Line items
         description = note or f"{vendor_name} Bill"
         if category:
             description = f"[{category}] {description}"
@@ -215,7 +279,7 @@ class BigcapitalClient:
             "billNumber": bill_num,
             "billDate": b_date,
             "dueDate": d_date,
-            "referenceNo": reference_no or bill_num,
+            "referenceNo": clean_ref or bill_num,
             "note": note or f"Recorded by Fiona Banks for {vendor_name}",
             "open": is_open,
             "entries": entries,
@@ -224,20 +288,33 @@ class BigcapitalClient:
         res = await self._request("POST", "/api/bills", payload=payload)
         if res.get("ok"):
             bill_id = res.get("data", {}).get("id")
+            payment_id = None
+            status_str = "OPEN" if is_open else "DRAFT"
+            if auto_pay and bill_id:
+                pay_res = await self.record_bill_payment(
+                    bill_id=bill_id,
+                    amount=round(float(amount), 2),
+                    payment_date=payment_date or b_date,
+                    statement=f"Auto-settled 1-step payment for {clean_ref or bill_num} ({vendor_name})",
+                )
+                if pay_res.get("ok"):
+                    payment_id = pay_res.get("payment_id")
+                    status_str = "PAID"
             return {
                 "ok": True,
                 "bill_id": bill_id,
+                "payment_id": payment_id,
                 "vendor_name": vendor_name,
                 "vendor_id": vendor_id,
                 "amount": float(amount),
                 "bill_date": b_date,
                 "due_date": d_date,
-                "status": "OPEN" if is_open else "DRAFT",
-                "message": f"Successfully created bill #{bill_id} for {vendor_name} (${amount:,.2f})",
+                "status": status_str,
+                "message": f"Successfully created bill #{bill_id} ({status_str}) for {vendor_name} (${amount:,.2f})",
             }
         return {"ok": False, "error": res.get("error")}
 
-    async def list_bills(self, status: Optional[str] = None, limit: int = 20) -> Dict[str, Any]:
+    async def list_bills(self, status: Optional[str] = None, limit: int = 100) -> Dict[str, Any]:
         """List bills from Bigcapital with status and balance."""
         params = {"page_size": limit}
         res = await self._request("GET", "/api/bills", params=params)
@@ -799,7 +876,7 @@ class BigcapitalClient:
         total_paid_bills = 0
 
         for b in bills:
-            status = b.get("status", "").upper()
+            status = (b.get("status") or "").upper()
             due_amt = float(b.get("due_amount", 0) or 0)
             total_payable += due_amt
             if status == "PAID" or due_amt == 0:
@@ -809,6 +886,7 @@ class BigcapitalClient:
 
         due_res = await self.get_due_bills()
         due_bills = due_res.get("due_bills", []) if due_res.get("ok") else []
+        urgent_count = len(due_bills) if due_bills else sum(1 for b in bills if b.get("is_overdue") and float(b.get("due_amount", 0) or 0) > 0)
 
         return {
             "ok": True,
@@ -816,7 +894,7 @@ class BigcapitalClient:
             "total_open_bills": total_open_bills,
             "total_paid_bills": total_paid_bills,
             "total_payable_usd": round(total_payable, 2),
-            "urgent_due_bills": len(due_bills),
+            "urgent_due_bills": urgent_count,
             "recent_bills_sample": bills[:5],
         }
 
