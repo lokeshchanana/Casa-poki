@@ -823,16 +823,16 @@ def categorize_request_flow(
 
     if any(k in blob for k in ("hannah reed", "ha_guardian", "ha_health", "ha_fix", "home assistant", "homeassistant", "ha.lokeshchanana.com")):
         return "home_assistant"
+    if any(k in blob for k in ("uptime kuma", "infra alert", "healed service", "ian torres", "docker", "self-heal", "auto-heal", "beszel")):
+        return "infra"
     if any(k in blob for k in ("fiona banks", "victor sterling", "bigcapital", "tax_audit", "finance_", "invoice", "bill", "expense", "expanse", "receipt", "tax")):
         return "finance"
-    if any(k in blob for k in ("miles miller", "twenty crm", "open house", "search_contacts", "create_contact", "update_contact", "crm", "lead", "intake")):
-        return "crm"
     if any(k in blob for k in ("silas drake", "mailman", "inbox", "email triage", "unread email")):
         return "email"
-    if any(k in blob for k in ("ian torres", "uptime kuma", "docker", "container", "self-heal", "auto-heal", "guardian")):
-        return "infra"
     if any(k in blob for k in ("maya reyes", "carter hayes", "cma", "mls", "post-close", "drip", "marketing", "listing")):
         return "marketing"
+    if any(k in blob for k in ("miles miller", "twenty crm", "open house", "search_contacts", "create_contact", "update_contact", "crm", "lead", "intake")):
+        return "crm"
     return "general"
 
 
@@ -1086,6 +1086,42 @@ OFFICE_PERSONAS = [
         "avatar": "⚖️",
         "color": "amber",
         "default_activity": "Auditing Fiona's Bigcapital ledger & verifying IRS proof archive",
+    },
+    {
+        "id": "social_scout",
+        "name": "Devon Brooks",
+        "role": "WA Market & Viral Trends Scout",
+        "station": "Social Media Wing • Trends Desk",
+        "avatar": "📡",
+        "color": "sky",
+        "default_activity": "Tracking Greater Seattle market stats & viral Reels formats",
+    },
+    {
+        "id": "avatar_artist",
+        "name": "Nadia Kapoor",
+        "role": "Animated Avatar Studio & Photo Curator",
+        "station": "Social Media Wing • Avatar Lab",
+        "avatar": "🎭",
+        "color": "fuchsia",
+        "default_activity": "Curating Google Photos & Loki's Animated Avatar Pack",
+    },
+    {
+        "id": "content_producer",
+        "name": "Leo Bennett",
+        "role": "Multi-Platform Content Producer",
+        "station": "Social Media Wing • Render Bay",
+        "avatar": "🎬",
+        "color": "orange",
+        "default_activity": "Rendering 4:5 carousels & 9:16 talking-avatar Reels",
+    },
+    {
+        "id": "social_ops",
+        "name": "Priya Nair",
+        "role": "Social Analytics, Cadence & Approval Desk",
+        "station": "Social Media Wing • Analytics Hub",
+        "avatar": "📈",
+        "color": "lime",
+        "default_activity": "Optimizing Pacific Time cadence & Postiz approval queue",
     },
 ]
 

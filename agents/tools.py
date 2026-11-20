@@ -931,6 +931,9 @@ TOOL_SCHEMAS = [
     },
 ]
 
+from social_tools import SOCIAL_TOOL_DEFINITIONS, execute_social_tool
+TOOL_SCHEMAS.extend(SOCIAL_TOOL_DEFINITIONS)
+
 
 # =============================================================================
 # Direct Twenty CRM Execution Handlers
@@ -2512,6 +2515,12 @@ async def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
 
         elif name == "process_post_close_drips":
             res = await _direct_process_post_close_drips(args)
+            res["duration_ms"] = int((time.time() - start_ts) * 1000)
+            res["raw_payload_sent"] = args
+            return res
+
+        elif name.startswith("social_"):
+            res = await execute_social_tool(name, args)
             res["duration_ms"] = int((time.time() - start_ts) * 1000)
             res["raw_payload_sent"] = args
             return res
