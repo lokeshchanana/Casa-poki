@@ -1,37 +1,75 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import OfficeFloorMap from './OfficeFloorMap';
-import AvatarCharacter from './AvatarCharacter';
 import {
-  Users,
   Activity,
   Server,
-  ShieldCheck,
   RefreshCw,
-  Clock,
   CheckCircle2,
-  AlertTriangle,
-  Play,
   RotateCw,
   Terminal,
-  Layers,
   ArrowRight,
-  ExternalLink,
   Cpu,
   Database,
-  Coffee,
-  MessageSquare,
   Sparkles,
   Search,
-  Eye
+  Filter
 } from 'lucide-react';
 
-export default function OfficeFloor({ onOpenChat }) {
-  const [floorState, setFloorState] = useState(null);
+const FLOW_CATEGORIES = [
+  { id: 'non_ha', label: 'Important (Non-HA)', color: 'indigo' },
+  { id: 'all', label: 'All', color: 'neutral' },
+  { id: 'finance', label: 'Finance & Tax', color: 'emerald' },
+  { id: 'crm', label: 'CRM & Clients', color: 'blue' },
+  { id: 'email', label: 'Email & Triage', color: 'violet' },
+  { id: 'home_assistant', label: 'Home Assistant', color: 'cyan' },
+  { id: 'infra', label: 'IT & Infra', color: 'amber' },
+  { id: 'marketing', label: 'Marketing & CMA', color: 'rose' },
+  { id: 'general', label: 'General', color: 'neutral' },
+];
+
+const AGENT_FILTERS = [
+  'All Agents',
+  'Marcus Vance',
+  'Fiona Banks',
+  'Victor Sterling',
+  'Miles Miller',
+  'Silas Drake',
+  'Hannah Reed',
+  'Ian Torres',
+  'Maya Reyes',
+  'Carter Hayes',
+  'Audrey Chen',
+];
+
+const CATEGORY_BADGE_STYLES = {
+  finance: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300',
+  crm: 'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300',
+  email: 'bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300',
+  home_assistant: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950/60 dark:text-cyan-300',
+  infra: 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300',
+  marketing: 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300',
+  general: 'bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300',
+};
+
+const CATEGORY_LABELS = {
+  finance: 'Finance & Tax',
+  crm: 'CRM & Clients',
+  email: 'Email & Triage',
+  home_assistant: 'Home Assistant',
+  infra: 'IT & Infra',
+  marketing: 'Marketing & CMA',
+  general: 'General',
+};
+
+export default function OfficeFloor() {
+  const [flows, setFlows] = useState([]);
+  const [flowStats, setFlowStats] = useState(null);
   const [containers, setContainers] = useState([]);
   const [monitors, setMonitors] = useState([]);
   const [selectedFlow, setSelectedFlow] = useState(null);
-  const [selectedAgent, setSelectedAgent] = useState(null);
-  const [activeView, setActiveView] = useState('floor'); // 'floor' | 'inspector' | 'telemetry' | 'memory'
+  const [activeView, setActiveView] = useState('inspector'); // 'inspector' | 'telemetry' | 'memory'
+  const [selectedCategory, setSelectedCategory] = useState('non_ha');
+  const [selectedAgentFilter, setSelectedAgentFilter] = useState('All Agents');
+  const [historyLimit, setHistoryLimit] = useState(200);
   const [memoryStats, setMemoryStats] = useState(null);
   const [memorySearchQuery, setMemorySearchQuery] = useState('');
   const [memorySearchResults, setMemorySearchResults] = useState([]);
@@ -45,31 +83,47 @@ export default function OfficeFloor({ onOpenChat }) {
   const [healingContainer, setHealingContainer] = useState(null);
   const [searchFilter, setSearchFilter] = useState('');
 
-  // Fetch all floor and telemetry data
+  // Fetch categorized flows, stats, and telemetry data
   const refreshData = useCallback(async () => {
     try {
-      const [floorRes, contRes, monRes, memRes] = await Promise.all([
-        fetch('/api/manager/office/floor-state').then(r => r.json()).catch(() => null),
+      const params = new URLSearchParams({ limit: String(historyLimit) });
+      if (selectedCategory === 'non_ha') {
+        params.set('exclude_category', 'home_assistant');
+      } else if (selectedCategory !== 'all') {
+        params.set('category', selectedCategory);
+      }
+      if (selectedAgentFilter && selectedAgentFilter !== 'All Agents') {
+        params.set('agent', selectedAgentFilter);
+      }
+      if (searchFilter.trim()) {
+        params.set('search', searchFilter.trim());
+      }
+
+      const [flowsRes, statsRes, contRes, monRes, memRes] = await Promise.all([
+        fetch(`/api/manager/office/flows?${params.toString()}`).then(r => r.json()).catch(() => []),
+        fetch('/api/manager/office/flow-stats').then(r => r.json()).catch(() => null),
         fetch('/api/manager/office/containers').then(r => r.json()).catch(() => ({ containers: [] })),
         fetch('/api/manager/office/monitors').then(r => r.json()).catch(() => ({ monitors: [] })),
         fetch('/api/manager/memory/stats').then(r => r.json()).catch(() => null),
       ]);
 
-      if (floorRes) {
-        setFloorState(floorRes);
-        if (!selectedFlow && floorRes.recent_flows?.length > 0) {
-          setSelectedFlow(floorRes.recent_flows[0]);
-        }
+      if (Array.isArray(flowsRes)) {
+        setFlows(flowsRes);
+        setSelectedFlow(prev => {
+          if (prev && flowsRes.some(f => f.flow_id === prev.flow_id)) return prev;
+          return flowsRes.length > 0 ? flowsRes[0] : null;
+        });
       }
+      if (statsRes && typeof statsRes.total === 'number') setFlowStats(statsRes);
       if (contRes?.containers) setContainers(contRes.containers);
       if (monRes?.monitors) setMonitors(monRes.monitors);
       if (memRes) setMemoryStats(memRes);
     } catch (err) {
-      console.error('Failed to fetch office floor state:', err);
+      console.error('Failed to fetch agent logs:', err);
     } finally {
       setLoading(false);
     }
-  }, [selectedFlow]);
+  }, [historyLimit, selectedCategory, selectedAgentFilter, searchFilter]);
 
   useEffect(() => {
     refreshData();
@@ -145,21 +199,37 @@ export default function OfficeFloor({ onOpenChat }) {
     }
   };
 
-  const agents = floorState?.agents || [];
-  const flows = floorState?.recent_flows || [];
-  const activeCount = agents.filter(a => a.status === 'active').length;
   const healthyContainers = containers.filter(c => c.state === 'running').length;
   const upMonitors = monitors.filter(m => m.status === 'UP').length;
 
-  const filteredFlows = flows.filter(f => {
-    if (!searchFilter) return true;
-    const q = searchFilter.toLowerCase();
-    return (
-      f.title?.toLowerCase().includes(q) ||
-      f.source?.toLowerCase().includes(q) ||
-      f.agents_involved?.some(a => a.toLowerCase().includes(q))
-    );
-  });
+  const getCategoryCount = (catId) => {
+    if (!flowStats) return null;
+    if (catId === 'all') return flowStats.total;
+    if (catId === 'non_ha') return flowStats.non_ha_total;
+    return flowStats.category_counts?.[catId] || 0;
+  };
+
+  const getAgentCount = (agentName) => {
+    if (!flowStats) return null;
+    if (agentName === 'All Agents') return flowStats.total;
+    return flowStats.agent_counts?.[agentName] || 0;
+  };
+
+  const formatTimestamp = (isoStr) => {
+    if (!isoStr) return '';
+    try {
+      const d = new Date(isoStr);
+      return d.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    } catch {
+      return isoStr.slice(0, 19).replace('T', ' ');
+    }
+  };
 
   return (
     <div className="flex-1 flex flex-col bg-ivory dark:bg-charcoal min-h-screen text-neutral-900 dark:text-neutral-100 transition-colors">
@@ -171,18 +241,18 @@ export default function OfficeFloor({ onOpenChat }) {
           <div>
             <div className="flex items-center gap-2">
               <span className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
-                <Users className="w-5 h-5" />
+                <Terminal className="w-5 h-5" />
               </span>
               <h2 className="text-xl font-serif font-bold text-neutral-900 dark:text-white">
-                Virtual Office Floor
+                Agent Query & Execution Logs
               </h2>
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Live Agent Operations
+                Live Trace History
               </span>
             </div>
             <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-              Autonomous workforce floor map, real-time agent activities, and end-to-end request flow tracing.
+              Full-space categorized query history, per-agent filtering, and step-by-step multi-agent execution traces.
             </p>
           </div>
 
@@ -191,13 +261,8 @@ export default function OfficeFloor({ onOpenChat }) {
             
             <div className="flex items-center gap-3 px-3 py-1.5 rounded-xl bg-neutral-100 dark:bg-charcoal border border-neutral-200 dark:border-neutral-800 text-xs">
               <div className="flex items-center gap-1.5">
-                <span className="text-neutral-400">Agents:</span>
-                <span className="font-bold text-neutral-900 dark:text-neutral-100">{agents.length}</span>
-                {activeCount > 0 ? (
-                  <span className="text-[10px] text-amber-500 font-semibold">({activeCount} busy)</span>
-                ) : (
-                  <span className="text-[10px] text-neutral-400">(All Idle)</span>
-                )}
+                <span className="text-neutral-400">Total Logs:</span>
+                <span className="font-bold text-neutral-900 dark:text-neutral-100">{flowStats?.total ?? flows.length}</span>
               </div>
               <div className="w-px h-3.5 bg-neutral-300 dark:bg-neutral-700" />
               <div className="flex items-center gap-1.5">
@@ -215,18 +280,6 @@ export default function OfficeFloor({ onOpenChat }) {
             <div className="flex items-center p-1 bg-neutral-100 dark:bg-charcoal rounded-xl border border-neutral-200 dark:border-neutral-800 text-xs">
               <button
                 type="button"
-                onClick={() => setActiveView('floor')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
-                  activeView === 'floor'
-                    ? 'bg-white dark:bg-charcoal-dark text-neutral-900 dark:text-white shadow-sm'
-                    : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100'
-                }`}
-              >
-                <Layers className="w-3.5 h-3.5 text-indigo-500" />
-                <span>Office Floor</span>
-              </button>
-              <button
-                type="button"
                 onClick={() => setActiveView('inspector')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
                   activeView === 'inspector'
@@ -234,8 +287,8 @@ export default function OfficeFloor({ onOpenChat }) {
                     : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100'
                 }`}
               >
-                <ArrowRight className="w-3.5 h-3.5 text-cyan-500" />
-                <span>Flow Inspector</span>
+                <Terminal className="w-3.5 h-3.5 text-indigo-500" />
+                <span>Query Logs</span>
                 {flows.length > 0 && (
                   <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300">
                     {flows.length}
@@ -280,7 +333,7 @@ export default function OfficeFloor({ onOpenChat }) {
                 onClick={refreshData}
                 disabled={loading}
                 className="p-2 rounded-lg bg-white dark:bg-charcoal-dark border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
-                title="Refresh floor state"
+                title="Refresh query logs"
               >
                 <RefreshCw className={`w-3.5 h-3.5 text-neutral-600 dark:text-neutral-400 ${loading ? 'animate-spin' : ''}`} />
               </button>
@@ -303,226 +356,181 @@ export default function OfficeFloor({ onOpenChat }) {
         </div>
       </div>
 
-      {/* Main Floor Container */}
-      <div className="max-w-7xl mx-auto w-full p-4 sm:p-8 flex-1 flex flex-col gap-6">
+      {/* Main Container */}
+      <div className="max-w-7xl mx-auto w-full p-4 sm:p-6 flex-1 flex flex-col gap-5">
 
-        {/* VIEW 1: INTERACTIVE OFFICE FLOOR PLAN */}
-        {activeView === 'floor' && (
-          <div className="flex flex-col gap-6">
-            
-            {/* Architectural Interactive Floor Map */}
-            <OfficeFloorMap
-              agents={agents}
-              recentFlows={flows}
-              containers={containers}
-              monitors={monitors}
-              onSelectAgent={(ag) => setSelectedAgent(ag)}
-              onOpenChat={onOpenChat}
-            />
-
-            {/* Selected Agent Workstation Drawer */}
-            {selectedAgent && (
-              <div className="rounded-2xl bg-white dark:bg-charcoal-dark border border-indigo-200 dark:border-indigo-900 p-6 shadow-sm">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <AvatarCharacter agentId={selectedAgent.id} state={selectedAgent.status || 'idle'} size={56} />
-                    <div>
-                      <h3 className="text-lg font-serif font-bold text-neutral-900 dark:text-white">
-                        {selectedAgent.name}
-                      </h3>
-                      <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                        {selectedAgent.role} • {selectedAgent.station}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {onOpenChat && (
-                      <button
-                        type="button"
-                        onClick={() => onOpenChat(selectedAgent.id)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors flex items-center gap-1.5 shadow-xs"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        <span>Chat</span>
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setSelectedAgent(null)}
-                      className="text-xs text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
-                    >
-                      Close
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4 pt-4 border-t border-neutral-200 dark:border-neutral-800">
-                  <div className="p-3 rounded-xl bg-neutral-50 dark:bg-charcoal border border-neutral-200 dark:border-neutral-800">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">Live Status</span>
-                    <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200 mt-1">
-                      {selectedAgent.status_text}
-                    </p>
-                  </div>
-                  <div className="p-3 rounded-xl bg-neutral-50 dark:bg-charcoal border border-neutral-200 dark:border-neutral-800">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">Current Task</span>
-                    <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200 mt-1 truncate">
-                      {selectedAgent.current_activity}
-                    </p>
-                  </div>
-                  <div className="p-3 rounded-xl bg-neutral-50 dark:bg-charcoal border border-neutral-200 dark:border-neutral-800">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">Domain Responsibility</span>
-                    <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200 mt-1">
-                      {selectedAgent.default_activity}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Quick Flow Overview (Bottom of Floor View) */}
-            <div className="rounded-2xl bg-white dark:bg-charcoal-dark border border-neutral-200 dark:border-neutral-800 p-6 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <ArrowRight className="w-4 h-4 text-indigo-500" />
-                  <h3 className="font-serif font-bold text-neutral-900 dark:text-white text-sm">
-                    Recent Multi-Agent Request Traces
-                  </h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveView('inspector')}
-                  className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
-                >
-                  <span>Open Full Flow Inspector</span>
-                  <ArrowRight className="w-3 h-3" />
-                </button>
-              </div>
-
-              {flows.length === 0 ? (
-                <p className="text-xs text-neutral-500 py-4 text-center">
-                  No requests recorded yet. Try sending a message in Manager Chat or an Open House sign-in!
-                </p>
-              ) : (
-                <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
-                  {flows.slice(0, 4).map((f) => (
-                    <div
-                      key={f.flow_id}
-                      onClick={() => {
-                        setSelectedFlow(f);
-                        setActiveView('inspector');
-                      }}
-                      className="py-3 flex items-center justify-between hover:bg-neutral-50 dark:hover:bg-charcoal/50 px-2 rounded-lg cursor-pointer transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className={`w-2 h-2 rounded-full ${f.status === 'completed' ? 'bg-emerald-500' : f.status === 'healed' ? 'bg-amber-500' : 'bg-indigo-500'}`} />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-neutral-900 dark:text-white">
-                              {f.title}
-                            </span>
-                            <span className="text-[10px] px-2 py-0.2 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
-                              {f.source}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-neutral-500 mt-0.5">
-                            Agents involved: {f.agents_involved?.join(' → ') || 'Marcus Vance'}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3 text-xs text-neutral-400">
-                        <span>{f.duration_ms ? `${f.duration_ms}ms` : 'instant'}</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-          </div>
-        )}
-
-        {/* VIEW 2: REQUEST FLOW INSPECTOR */}
+        {/* VIEW 1: FULL-SPACE CATEGORIZED & PER-AGENT QUERY LOGS */}
         {activeView === 'inspector' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
-            
-            {/* Left Column: Recent Flows List */}
-            <div className="lg:col-span-5 flex flex-col gap-4">
-              
-              <div className="relative">
-                <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  placeholder="Filter flows by keyword, source, agent..."
-                  value={searchFilter}
-                  onChange={(e) => setSearchFilter(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-white dark:bg-charcoal-dark border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                />
-              </div>
+          <div className="flex flex-col gap-4 flex-1">
 
-              <div className="rounded-2xl bg-white dark:bg-charcoal-dark border border-neutral-200 dark:border-neutral-800 p-4 shadow-sm flex flex-col gap-2 overflow-y-auto max-h-[750px]">
-                <div className="text-xs font-bold uppercase tracking-wider text-neutral-400 px-2 py-1">
-                  Recorded Functional Flows ({filteredFlows.length})
-                </div>
-
-                {filteredFlows.length === 0 ? (
-                  <p className="text-xs text-neutral-500 p-4 text-center">
-                    No matching flows found.
-                  </p>
-                ) : (
-                  filteredFlows.map((flow) => {
-                    const isSelected = selectedFlow?.flow_id === flow.flow_id;
+            {/* Category & Agent Filter Console */}
+            <div className="rounded-2xl bg-white dark:bg-charcoal-dark border border-neutral-200 dark:border-neutral-800 p-4 shadow-sm flex flex-col gap-3">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                {/* Category Filter Pills */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-neutral-400 mr-1">
+                    <Filter className="w-3 h-3" />
+                    Category:
+                  </span>
+                  {FLOW_CATEGORIES.map((cat) => {
+                    const cnt = getCategoryCount(cat.id);
+                    const active = selectedCategory === cat.id;
                     return (
-                      <div
-                        key={flow.flow_id}
-                        onClick={() => setSelectedFlow(flow)}
-                        className={`p-3 rounded-xl border cursor-pointer transition-all ${
-                          isSelected
-                            ? 'bg-indigo-50/80 dark:bg-indigo-950/40 border-indigo-400 dark:border-indigo-600 shadow-sm'
-                            : 'bg-neutral-50/60 dark:bg-charcoal/50 hover:bg-neutral-100 dark:hover:bg-charcoal border-neutral-200/80 dark:border-neutral-800'
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => setSelectedCategory(cat.id)}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all ${
+                          active
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                            : 'bg-neutral-50 dark:bg-charcoal text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-800'
                         }`}
                       >
-                        <div className="flex items-center justify-between text-xs mb-1">
-                          <span className="font-bold text-neutral-900 dark:text-white truncate max-w-[220px]">
-                            {flow.title}
+                        <span>{cat.label}</span>
+                        {cnt !== null && (
+                          <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                            active ? 'bg-white/20 text-white' : 'bg-neutral-200/80 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400'
+                          }`}>
+                            {cnt}
                           </span>
-                          <span className="text-[10px] text-neutral-400 font-mono">
-                            {flow.created_at ? flow.created_at.slice(11, 19) : ''}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 text-[11px] text-neutral-500 dark:text-neutral-400 mb-2">
-                          <span className="px-1.5 py-0.2 rounded bg-neutral-200/70 dark:bg-neutral-800 text-[10px]">
-                            {flow.source}
-                          </span>
-                          <span>•</span>
-                          <span>{flow.duration_ms || 0}ms</span>
-                        </div>
-
-                        {/* Agents Path Pills */}
-                        <div className="flex items-center gap-1 flex-wrap">
-                          {flow.agents_involved?.map((agent, i) => (
-                            <React.Fragment key={agent}>
-                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white dark:bg-charcoal-dark border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300">
-                                {agent}
-                              </span>
-                              {i < flow.agents_involved.length - 1 && (
-                                <ArrowRight className="w-2.5 h-2.5 text-neutral-400" />
-                              )}
-                            </React.Fragment>
-                          ))}
-                        </div>
-                      </div>
+                        )}
+                      </button>
                     );
-                  })
-                )}
+                  })}
+                </div>
+
+                {/* Search + History Depth */}
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="relative w-full sm:w-64">
+                    <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Search queries, tools, payloads..."
+                      value={searchFilter}
+                      onChange={(e) => setSearchFilter(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl bg-neutral-50 dark:bg-charcoal border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <select
+                    value={historyLimit}
+                    onChange={(e) => setHistoryLimit(Number(e.target.value))}
+                    className="px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-neutral-50 dark:bg-charcoal border border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300"
+                    title="Maximum history records to load"
+                  >
+                    <option value={100}>Last 100</option>
+                    <option value={200}>Last 200</option>
+                    <option value={500}>Last 500</option>
+                  </select>
+                </div>
               </div>
 
+              {/* Per-Agent Filter Pills */}
+              <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-neutral-100 dark:border-neutral-800">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 mr-1">
+                  Agent:
+                </span>
+                {AGENT_FILTERS.map((agName) => {
+                  const cnt = getAgentCount(agName);
+                  const active = selectedAgentFilter === agName;
+                  return (
+                    <button
+                      key={agName}
+                      type="button"
+                      onClick={() => setSelectedAgentFilter(agName)}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-all ${
+                        active
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                          : 'bg-white dark:bg-charcoal text-neutral-600 dark:text-neutral-300 border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                      }`}
+                    >
+                      <span>{agName}</span>
+                      {cnt !== null && (
+                        <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                          active ? 'bg-white/20 text-white' : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400'
+                        }`}>
+                          {cnt}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* Right Column: Detailed Flow Visual Pipeline Drawer */}
-            <div className="lg:col-span-7">
+            {/* Split Logs & Inspector Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
+              {/* Left Column: Deep History Flows List */}
+              <div className="lg:col-span-5 flex flex-col">
+                <div className="rounded-2xl bg-white dark:bg-charcoal-dark border border-neutral-200 dark:border-neutral-800 p-4 shadow-sm flex flex-col gap-2 overflow-y-auto max-h-[78vh]">
+                  <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-neutral-400 px-2 py-1">
+                    <span>Showing {flows.length} Queries</span>
+                    {selectedCategory === 'non_ha' && (
+                      <span className="text-[10px] font-semibold text-indigo-500 normal-case">
+                        HA noise hidden
+                      </span>
+                    )}
+                  </div>
+
+                  {flows.length === 0 ? (
+                    <p className="text-xs text-neutral-500 p-6 text-center">
+                      No matching queries found for the selected category/agent filter.
+                    </p>
+                  ) : (
+                    flows.map((flow) => {
+                      const isSelected = selectedFlow?.flow_id === flow.flow_id;
+                      const catKey = flow.category || 'general';
+                      return (
+                        <div
+                          key={flow.flow_id}
+                          onClick={() => setSelectedFlow(flow)}
+                          className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                            isSelected
+                              ? 'bg-indigo-50/80 dark:bg-indigo-950/40 border-indigo-400 dark:border-indigo-600 shadow-sm'
+                              : 'bg-neutral-50/60 dark:bg-charcoal/50 hover:bg-neutral-100 dark:hover:bg-charcoal border-neutral-200/80 dark:border-neutral-800'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2 text-xs mb-1">
+                            <span className="font-bold text-neutral-900 dark:text-white truncate">
+                              {flow.title}
+                            </span>
+                            <span className="text-[10px] text-neutral-400 font-mono shrink-0">
+                              {formatTimestamp(flow.created_at)}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-neutral-500 dark:text-neutral-400 mb-2">
+                            <span className={`px-1.5 py-0.2 rounded text-[10px] font-semibold ${CATEGORY_BADGE_STYLES[catKey] || CATEGORY_BADGE_STYLES.general}`}>
+                              {CATEGORY_LABELS[catKey] || catKey}
+                            </span>
+                            <span className="px-1.5 py-0.2 rounded bg-neutral-200/70 dark:bg-neutral-800 text-[10px]">
+                              {flow.source}
+                            </span>
+                            <span>•</span>
+                            <span>{flow.duration_ms || 0}ms</span>
+                          </div>
+
+                          {/* Agents Path Pills */}
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {flow.agents_involved?.map((agent, i) => (
+                              <React.Fragment key={agent}>
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white dark:bg-charcoal-dark border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300">
+                                  {agent}
+                                </span>
+                                {i < flow.agents_involved.length - 1 && (
+                                  <ArrowRight className="w-2.5 h-2.5 text-neutral-400" />
+                                )}
+                              </React.Fragment>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column: Detailed Flow Visual Pipeline Drawer */}
+              <div className="lg:col-span-7">
               {selectedFlow ? (
                 <div className="rounded-2xl bg-white dark:bg-charcoal-dark border border-neutral-200 dark:border-neutral-800 p-6 shadow-sm flex flex-col gap-6">
                   
@@ -636,6 +644,7 @@ export default function OfficeFloor({ onOpenChat }) {
               )}
             </div>
 
+          </div>
           </div>
         )}
 

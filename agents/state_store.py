@@ -103,10 +103,16 @@ def init_store() -> None:
             payload_preview TEXT,
             result_summary TEXT,
             duration_ms INTEGER DEFAULT 0,
+            category TEXT DEFAULT '',
             created_at TEXT NOT NULL
         )
         """
     )
+
+    try:
+        cur.execute("ALTER TABLE request_flows ADD COLUMN category TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
 
     # Seed default lessons if empty
     cur.execute("SELECT COUNT(*) FROM agent_lessons")
@@ -801,6 +807,35 @@ def clear_chat_history(session_id: str) -> None:
     conn.close()
 
 
+def categorize_request_flow(
+    source: str,
+    title: str,
+    agents_involved: List[str],
+    payload_preview: Any = None,
+) -> str:
+    """Deterministically categorizes an agent request flow for log filtering."""
+    blob = " ".join([
+        str(source or ""),
+        str(title or ""),
+        " ".join(str(a) for a in (agents_involved or [])),
+        json.dumps(payload_preview) if isinstance(payload_preview, (dict, list)) else str(payload_preview or ""),
+    ]).lower()
+
+    if any(k in blob for k in ("hannah reed", "ha_guardian", "ha_health", "ha_fix", "home assistant", "homeassistant", "ha.lokeshchanana.com")):
+        return "home_assistant"
+    if any(k in blob for k in ("fiona banks", "victor sterling", "bigcapital", "tax_audit", "finance_", "invoice", "bill", "expense", "expanse", "receipt", "tax")):
+        return "finance"
+    if any(k in blob for k in ("miles miller", "twenty crm", "open house", "search_contacts", "create_contact", "update_contact", "crm", "lead", "intake")):
+        return "crm"
+    if any(k in blob for k in ("silas drake", "mailman", "inbox", "email triage", "unread email")):
+        return "email"
+    if any(k in blob for k in ("ian torres", "uptime kuma", "docker", "container", "self-heal", "auto-heal", "guardian")):
+        return "infra"
+    if any(k in blob for k in ("maya reyes", "carter hayes", "cma", "mls", "post-close", "drip", "marketing", "listing")):
+        return "marketing"
+    return "general"
+
+
 def log_request_flow(
     flow_id: str,
     source: str,
@@ -811,40 +846,91 @@ def log_request_flow(
     payload_preview: Optional[Any] = None,
     result_summary: Optional[str] = None,
     duration_ms: int = 0,
+    category: Optional[str] = None,
 ) -> None:
     init_store()
     now = datetime.utcnow().isoformat() + "Z"
     agents_json = json.dumps(agents_involved)
     steps_json = json.dumps(steps)
     payload_str = json.dumps(payload_preview) if isinstance(payload_preview, (dict, list)) else str(payload_preview or "")
-    
+    resolved_cat = category or categorize_request_flow(source, title, agents_involved, payload_preview)
+
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute(
         """
         INSERT OR REPLACE INTO request_flows (
-            flow_id, source, title, status, agents_involved, steps, payload_preview, result_summary, duration_ms, created_at
+            flow_id, source, title, status, agents_involved, steps, payload_preview, result_summary, duration_ms, category, created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (flow_id, source, title, status, agents_json, steps_json, payload_str, result_summary or "", duration_ms, now),
+        (flow_id, source, title, status, agents_json, steps_json, payload_str, result_summary or "", duration_ms, resolved_cat, now),
     )
     conn.commit()
     conn.close()
 
 
-def get_recent_request_flows(limit: int = 30) -> List[Dict[str, Any]]:
+def _backfill_flow_categories(conn: sqlite3.Connection) -> None:
+    cur = conn.cursor()
+    rows = cur.execute(
+        "SELECT id, source, title, agents_involved, payload_preview FROM request_flows WHERE category IS NULL OR category = ''"
+    ).fetchall()
+    if not rows:
+        return
+    for row_id, src, title, agents_raw, payload_raw in rows:
+        try:
+            agents = json.loads(agents_raw) if agents_raw else []
+        except Exception:
+            agents = []
+        cat = categorize_request_flow(src, title, agents, payload_raw)
+        cur.execute("UPDATE request_flows SET category = ? WHERE id = ?", (cat, row_id))
+    conn.commit()
+
+
+def get_recent_request_flows(
+    limit: int = 200,
+    category: Optional[str] = None,
+    exclude_category: Optional[str] = None,
+    agent: Optional[str] = None,
+    search: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     init_store()
     conn = sqlite3.connect(DB_PATH)
+    _backfill_flow_categories(conn)
     cur = conn.cursor()
+
+    where_clauses = []
+    params: List[Any] = []
+
+    if category and category != "all":
+        where_clauses.append("category = ?")
+        params.append(category)
+    if exclude_category:
+        where_clauses.append("category != ?")
+        params.append(exclude_category)
+    if agent and agent != "all":
+        where_clauses.append("LOWER(agents_involved) LIKE ?")
+        params.append(f"%{agent.lower()}%")
+    if search and search.strip():
+        q = f"%{search.strip().lower()}%"
+        where_clauses.append(
+            "(LOWER(title) LIKE ? OR LOWER(source) LIKE ? OR LOWER(agents_involved) LIKE ? OR LOWER(result_summary) LIKE ? OR LOWER(payload_preview) LIKE ?)"
+        )
+        params.extend([q, q, q, q, q])
+
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+    safe_limit = max(1, min(int(limit or 200), 500))
+    params.append(safe_limit)
+
     cur.execute(
-        """
-        SELECT flow_id, source, title, status, agents_involved, steps, payload_preview, result_summary, duration_ms, created_at
+        f"""
+        SELECT flow_id, source, title, status, agents_involved, steps, payload_preview, result_summary, duration_ms, category, created_at
         FROM request_flows
+        {where_sql}
         ORDER BY id DESC
         LIMIT ?
         """,
-        (limit,),
+        params,
     )
     rows = cur.fetchall()
     conn.close()
@@ -863,7 +949,7 @@ def get_recent_request_flows(limit: int = 30) -> List[Dict[str, Any]]:
             payload = json.loads(r[6])
         except Exception:
             payload = r[6]
-            
+
         flows.append({
             "flow_id": r[0],
             "source": r[1],
@@ -874,9 +960,49 @@ def get_recent_request_flows(limit: int = 30) -> List[Dict[str, Any]]:
             "payload_preview": payload,
             "result_summary": r[7],
             "duration_ms": r[8],
-            "created_at": r[9],
+            "category": r[9] or categorize_request_flow(r[1], r[2], agents, payload),
+            "created_at": r[10],
         })
     return flows
+
+
+def get_request_flow_stats() -> Dict[str, Any]:
+    """Returns total count, per-category counts, and per-agent counts across all logged flows."""
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    _backfill_flow_categories(conn)
+    cur = conn.cursor()
+
+    rows = cur.execute("SELECT category, agents_involved FROM request_flows").fetchall()
+    conn.close()
+
+    category_counts: Dict[str, int] = {}
+    agent_counts: Dict[str, int] = {}
+    total = len(rows)
+    non_ha_total = 0
+
+    for cat, agents_raw in rows:
+        c = cat or "general"
+        category_counts[c] = category_counts.get(c, 0) + 1
+        if c != "home_assistant":
+            non_ha_total += 1
+        try:
+            agents = json.loads(agents_raw) if agents_raw else []
+        except Exception:
+            agents = []
+        seen_in_row = set()
+        for a in agents:
+            name = str(a).strip()
+            if name and name not in seen_in_row:
+                seen_in_row.add(name)
+                agent_counts[name] = agent_counts.get(name, 0) + 1
+
+    return {
+        "total": total,
+        "non_ha_total": non_ha_total,
+        "category_counts": category_counts,
+        "agent_counts": agent_counts,
+    }
 
 
 OFFICE_PERSONAS = [

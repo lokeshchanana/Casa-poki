@@ -19,6 +19,7 @@ from state_store import (
     get_chat_history,
     get_office_floor_state,
     get_recent_request_flows,
+    get_request_flow_stats,
     get_system_summary,
     init_store,
     cancel_post_close_drip,
@@ -119,8 +120,25 @@ def office_floor_state() -> dict:
 
 
 @app.get("/api/manager/office/flows")
-def office_flows(limit: int = 30) -> list:
-    return get_recent_request_flows(limit=limit)
+def office_flows(
+    limit: int = 200,
+    category: Optional[str] = None,
+    exclude_category: Optional[str] = None,
+    agent: Optional[str] = None,
+    search: Optional[str] = None,
+) -> list:
+    return get_recent_request_flows(
+        limit=limit,
+        category=category,
+        exclude_category=exclude_category,
+        agent=agent,
+        search=search,
+    )
+
+
+@app.get("/api/manager/office/flow-stats")
+def office_flow_stats() -> dict:
+    return get_request_flow_stats()
 
 
 @app.get("/api/manager/office/containers")

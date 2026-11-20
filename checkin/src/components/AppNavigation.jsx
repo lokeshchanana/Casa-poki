@@ -76,10 +76,7 @@ export default function AppNavigation({ activeTab, setActiveTab, isKioskMode, to
             }`}
           >
             <Users className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-            <span>Office Floor</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-bold">
-              7
-            </span>
+            <span>Agent Logs</span>
           </button>
         </div>
 
