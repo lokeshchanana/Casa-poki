@@ -225,7 +225,11 @@ COMPOSE_DIRS=(
   "agents"
   "bigcapital"
   "music-assistant"
+  "postiz"
 )
+
+mkdir -p /tank/social/avatars /tank/social/photos /tank/social/renders /tank/social/fonts /tank/social/analytics /tank/postiz/postgres /tank/postiz/redis /tank/postiz/config /tank/postiz/uploads
+chown -R "${TARGET_USER}:${TARGET_USER}" /tank/social || true
 
 for d in "${COMPOSE_DIRS[@]}"; do
   TARGET_COMPOSE_DIR="${REPO_DIR}/${d}"

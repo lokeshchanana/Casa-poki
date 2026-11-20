@@ -19,10 +19,16 @@ services:
       - TASK_TOKEN_BUDGET=64000
       - AGENT_BACKEND=antigravity
       - AGY_PATH=/usr/local/bin/agy
+      - SOCIAL_STORAGE_DIR=/tank/social
+      - POSTIZ_BASE_URL=http://192.168.1.240:4007/api/public/v1
     volumes:
       - /tank/n8n:/tank/n8n:ro
       - /tank/monitor:/tank/monitor:ro
       - /tank/bigcapital/tax_vault:/tank/bigcapital/tax_vault
+      - /tank/social:/tank/social
+      - /home/lokesh/Casa-poki/.agents:/workspace/.agents:ro
+      - /home/lokesh/.gemini/config:/root/.gemini/config:ro
+      - /home/lokesh/Casa-poki/real-estate/public:/workspace/real-estate-public:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - .:/app
       - ./data:/app/data

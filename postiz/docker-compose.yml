@@ -1,0 +1,88 @@
+services:
+  postiz:
+    image: ghcr.io/gitroomhq/postiz-app:latest
+    container_name: postiz
+    restart: always
+    ports:
+      - "4007:5000"
+    env_file:
+      - .env
+    environment:
+      MAIN_URL: "${MAIN_URL:-https://postiz.lokeshchanana.com}"
+      FRONTEND_URL: "${FRONTEND_URL:-https://postiz.lokeshchanana.com}"
+      NEXT_PUBLIC_BACKEND_URL: "${NEXT_PUBLIC_BACKEND_URL:-https://postiz.lokeshchanana.com/api}"
+      JWT_SECRET: "${JWT_SECRET}"
+      DATABASE_URL: "postgresql://postiz:${POSTGRES_PASSWORD}@postiz-postgres:5432/postiz"
+      REDIS_URL: "redis://postiz-redis:6379"
+      TEMPORAL_ADDRESS: "postiz-temporal:7233"
+      STORAGE_PROVIDER: "local"
+      UPLOAD_DIRECTORY: "/uploads"
+      NEXT_PUBLIC_UPLOAD_DIRECTORY: "/uploads"
+      BACKEND_INTERNAL_URL: "http://localhost:3000"
+      IS_GENERAL: "true"
+      DISABLE_REGISTRATION: "false"
+      API_LIMIT: "120"
+    volumes:
+      - /tank/postiz/config:/config
+      - /tank/postiz/uploads:/uploads
+    depends_on:
+      postiz-postgres:
+        condition: service_healthy
+      postiz-redis:
+        condition: service_healthy
+      postiz-temporal:
+        condition: service_started
+    networks:
+      - postiz-net
+
+  postiz-postgres:
+    image: postgres:17-alpine
+    container_name: postiz-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postiz
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_DB: postiz
+    volumes:
+      - /tank/postiz/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postiz -d postiz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - postiz-net
+
+  postiz-redis:
+    image: redis:7.2-alpine
+    container_name: postiz-redis
+    restart: always
+    volumes:
+      - /tank/postiz/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - postiz-net
+
+  postiz-temporal:
+    image: temporalio/auto-setup:latest
+    container_name: postiz-temporal
+    restart: always
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: postiz
+      POSTGRES_PWD: "${POSTGRES_PASSWORD}"
+      POSTGRES_SEEDS: postiz-postgres
+    depends_on:
+      postiz-postgres:
+        condition: service_healthy
+    networks:
+      - postiz-net
+
+networks:
+  postiz-net:
+    driver: bridge

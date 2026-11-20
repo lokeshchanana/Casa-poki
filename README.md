@@ -115,6 +115,8 @@ Casa-poki enforces total physical separation between application code, applicati
   | `tank/re_office_data`| Office 365 synchronization state and cached tokens |
   | `tank/relaticle` | Relaticle CRM file storage, OAuth keys, and Redis state |
   | `tank/music-assistant` | Music Assistant server database, cache, and local media library |
+  | `tank/social` | Social Media Studio assets (Animated Avatars, Google Photos, Brand Fonts, Renders) |
+  | `tank/postiz` | Self-hosted Postiz scheduler Postgres, Redis, and uploaded media |
 
 ### Secrets Management & Hygiene
 - **Zero Leak Policy**: No secret, password, private key, token, or `.env` file is ever committed to version control.
@@ -213,6 +215,7 @@ Casa-poki relies on native, block-level ZFS replication to a dedicated secondary
 | :--- | :--- | :--- | :--- |
 | **80 / 443** | `nginx` | HTTP / HTTPS Ingress | Local LAN / Gateway |
 | **3001** | `uptime-kuma` | Uptime Monitor UI | Cloudflare Tunnel / Status Subdomain |
+| **4007** | `postiz` | Social Media Scheduler & Analytics | Cloudflare Tunnel / `postiz.lokeshchanana.com` |
 | **3030 / 8053** | `adguardhome` | AdGuard Web Interface | Local LAN Only |
 | **5432** | `postgres` | Relational Database | Internal Docker Network |
 | **5678** | `n8n` | Workflow Automation | Cloudflare Tunnel / Automation Subdomain |

@@ -37,8 +37,11 @@ from tools import (
     _direct_list_post_close_drips,
     _direct_process_post_close_drips,
 )
+import social_db
+from social_router import router as social_router
 
-app = FastAPI(title="Multi-Agent Manager Hub (Manager + IT + Auditor)")
+app = FastAPI(title="Multi-Agent Manager Hub (Manager + IT + Auditor + Social Studio)")
+app.include_router(social_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -80,6 +83,7 @@ class MemoryQueryRequest(BaseModel):
 @app.on_event("startup")
 def on_startup() -> None:
     init_store()
+    social_db.init_social_db()
     vector_memory.init_vector_memory_db()
     asyncio.create_task(_post_close_scheduler_loop())
 

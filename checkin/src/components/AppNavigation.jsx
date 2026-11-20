@@ -78,6 +78,19 @@ export default function AppNavigation({ activeTab, setActiveTab, isKioskMode, to
             <Users className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
             <span>Agent Logs</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('social')}
+            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+              activeTab === 'social'
+                ? 'bg-white dark:bg-charcoal-dark text-neutral-900 dark:text-white shadow-sm'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+            <span>Social Studio</span>
+          </button>
         </div>
 
         {/* Right Action Icons */}

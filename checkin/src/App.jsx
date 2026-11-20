@@ -4,6 +4,7 @@ import AppNavigation from './components/AppNavigation';
 import OpenHouseSignIn from './components/OpenHouseSignIn';
 import ManagerChat from './components/ManagerChat';
 import OfficeFloor from './components/OfficeFloor';
+import SocialStudio from './components/SocialStudio';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState(() => {
@@ -11,6 +12,7 @@ export default function App() {
     const tabParam = params.get('tab');
     if (tabParam === 'manager' || tabParam === 'crm' || tabParam === 'chat') return 'manager';
     if (tabParam === 'office' || tabParam === 'floor') return 'office';
+    if (tabParam === 'social' || tabParam === 'studio') return 'social';
     const saved = localStorage.getItem('checkin_active_tab');
     if (saved === 'crm') return 'manager';
     return saved || 'checkin';
@@ -37,6 +39,9 @@ export default function App() {
           )}
           {activeTab === 'office' && (
             <OfficeFloor onOpenChat={() => setActiveTab('manager')} />
+          )}
+          {activeTab === 'social' && (
+            <SocialStudio />
           )}
         </main>
       </div>

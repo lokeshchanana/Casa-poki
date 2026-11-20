@@ -876,7 +876,11 @@ export default function OfficeFloor() {
                           <option value="auditor">Audrey Chen (Auditor)</option>
                           <option value="intake">Miles Miller (Intake)</option>
                           <option value="finance">Fiona Banks (Finance)</option>
-                          <option value="marketing">Maya Reyes (Marketing)</option>
+                          <option value="marketing">Maya Reyes (Creative Lead)</option>
+                          <option value="social_scout">Devon Brooks (Market & Viral Scout)</option>
+                          <option value="avatar_artist">Nadia Kapoor (Avatar & Photo Studio)</option>
+                          <option value="content_producer">Leo Bennett (Content Producer)</option>
+                          <option value="social_ops">Priya Nair (Analytics & Cadence)</option>
                         </select>
                       </div>
 
