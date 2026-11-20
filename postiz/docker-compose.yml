@@ -31,7 +31,7 @@ services:
       postiz-redis:
         condition: service_healthy
       postiz-temporal:
-        condition: service_started
+        condition: service_healthy
     networks:
       - postiz-net
 
@@ -77,6 +77,13 @@ services:
       POSTGRES_USER: postiz
       POSTGRES_PWD: "${POSTGRES_PASSWORD}"
       POSTGRES_SEEDS: postiz-postgres
+      SKIP_ADD_CUSTOM_SEARCH_ATTRIBUTES: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "temporal operator cluster health --address postiz-temporal:7233 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     depends_on:
       postiz-postgres:
         condition: service_healthy
