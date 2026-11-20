@@ -56,6 +56,7 @@ def init_social_db() -> None:
                 graded_path TEXT,
                 pose_or_tags TEXT DEFAULT '',
                 source TEXT DEFAULT 'local',       -- 'antigravity' | 'google_photos' | 'upload' | 'seed'
+                approval_status TEXT DEFAULT 'PENDING_REVIEW', -- 'MASTER' | 'APPROVED' | 'PENDING_REVIEW' | 'REJECTED'
                 usage_count INTEGER DEFAULT 0,
                 avg_engagement REAL DEFAULT 0.0,
                 created_at TEXT NOT NULL
@@ -128,6 +129,15 @@ def init_social_db() -> None:
             );
             """
         )
+        # Safe migration for existing DBs missing approval_status
+        cols = [r["name"] for r in c.execute("PRAGMA table_info(social_media_assets)").fetchall()]
+        if "approval_status" not in cols:
+            c.execute("ALTER TABLE social_media_assets ADD COLUMN approval_status TEXT DEFAULT 'PENDING_REVIEW'")
+        # Prune DB asset rows whose backing files were removed
+        rows = c.execute("SELECT id, file_path FROM social_media_assets").fetchall()
+        for r in rows:
+            if not os.path.exists(r["file_path"]):
+                c.execute("DELETE FROM social_media_assets WHERE id = ?", (r["id"],))
     _seed_existing_assets()
     _seed_default_cadence()
 
@@ -142,44 +152,44 @@ def _seed_existing_assets() -> None:
         for fn in sorted(os.listdir(avatar_dir)):
             if fn.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
                 full = os.path.join(avatar_dir, fn)
-                pose = os.path.splitext(fn)[0].replace("loki_avatar_", "").replace("_", " ").title()
-                entries.append(("avatar", f"Loki Avatar — {pose}", full, pose.lower(), "antigravity"))
+                pose = os.path.splitext(fn)[0].replace("loki_avatar_", "").replace("loki_vec_", "").replace("_", " ").title()
+                st = "MASTER" if "master" in fn.lower() else "PENDING_REVIEW"
+                entries.append(("avatar", f"Loki Avatar — {pose}", full, pose.lower(), "antigravity", st))
     if os.path.isdir(photo_dir):
         for fn in sorted(os.listdir(photo_dir)):
             if fn.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
                 full = os.path.join(photo_dir, fn)
                 label = os.path.splitext(fn)[0].replace("_", " ").replace("-", " ").title()
-                entries.append(("photo", label, full, "portrait,loki,personal", "seed"))
+                entries.append(("photo", label, full, "portrait,loki,personal", "seed", "APPROVED"))
 
     if not entries:
         return
     with _conn() as c:
-        for asset_type, title, fpath, tags, src in entries:
+        for asset_type, title, fpath, tags, src, st in entries:
             c.execute(
                 """
                 INSERT OR IGNORE INTO social_media_assets
-                (id, asset_type, title, file_path, pose_or_tags, source, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (id, asset_type, title, file_path, pose_or_tags, source, approval_status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (f"ast_{uuid.uuid4().hex[:10]}", asset_type, title, fpath, tags, src, now),
+                (f"ast_{uuid.uuid4().hex[:10]}", asset_type, title, fpath, tags, src, st, now),
             )
 
 
 def _seed_default_cadence() -> None:
-    """Seed baseline Pacific Time cadence rules if empty."""
+    """Seed baseline Pacific Time static-image cadence rules (zero AI audio)."""
     with _conn() as c:
         count = c.execute("SELECT COUNT(*) FROM social_cadence_rules").fetchone()[0]
         if count > 0:
             return
         now = _now_iso()
         baseline = [
-            ("instagram_reel", "Tue", "12:00", "market_update", "9:16 Talking Avatar Reel", "animated_avatar", 0.78, "Midday Seattle market pulse reels drive highest saves."),
-            ("instagram_reel", "Thu", "17:30", "property_walkthrough", "9:16 Walkthrough / Ken Burns Reel", "real_photo", 0.76, "Evening commute window captures local home-browsers."),
-            ("instagram_carousel", "Mon", "08:30", "buyer_seller_tip", "4:5 Branded Ivory Carousel", "animated_avatar", 0.74, "Start-of-week educational carousels earn strong bookmark rates."),
-            ("instagram_story", "Wed", "16:30", "personal_story", "9:16 Poll / Behind-the-Scenes Story", "real_photo", 0.72, "Authentic field photos keep story replies warm."),
-            ("facebook", "Sat", "10:30", "open_house", "1.91:1 Community Update Card", "hybrid", 0.70, "Weekend local community traffic peaks mid-morning."),
-            ("tiktok", "Fri", "18:00", "market_update", "9:16 Hook-First Short Video", "animated_avatar", 0.73, "Friday evening real estate curiosity hook format."),
-            ("twitter", "Wed", "08:00", "market_update", "16:9 Data Card + Concise Take", "animated_avatar", 0.71, "Morning PNW tech & finance audience checks market threads."),
+            ("instagram_carousel", "Mon", "08:30", "buyer_seller_tip", "4:5 Editorial Ivory Carousel (Static)", "animated_avatar", 0.78, "Start-of-week educational carousels earn strong bookmark & save rates."),
+            ("market_infographic", "Tue", "12:00", "market_update", "9:16 WA Market Infographic Poster (Static)", "animated_avatar", 0.82, "Clean visual stat cards + vector Loki outperform text-heavy updates."),
+            ("instagram_story", "Wed", "16:30", "personal_story", "9:16 Interactive Poll Story Card (Static)", "real_photo", 0.75, "Authentic field photos keep Story replies warm without audio."),
+            ("instagram_post", "Thu", "17:30", "property_walkthrough", "4:5 Puget Sound Spotlight Graphic (Static)", "real_photo", 0.77, "Evening commute window captures local home-browsers."),
+            ("facebook", "Sat", "10:30", "open_house", "1.91:1 Community Update Card (Static)", "hybrid", 0.73, "Weekend local community traffic peaks mid-morning."),
+            ("twitter", "Wed", "08:00", "market_update", "16:9 Data Card + Concise Take (Static)", "animated_avatar", 0.74, "Morning PNW tech & finance audience engages with crisp data graphics."),
         ]
         for plat, dow, tpt, pil, fmt, vmode, conf, rat in baseline:
             c.execute(
@@ -298,6 +308,49 @@ def get_media_asset(asset_id: str) -> Optional[Dict[str, Any]]:
     with _conn() as c:
         r = c.execute("SELECT * FROM social_media_assets WHERE id = ?", (asset_id,)).fetchone()
     return dict(r) if r else None
+
+
+def update_media_asset_status(asset_id: str, approval_status: str) -> Optional[Dict[str, Any]]:
+    allowed = {"MASTER", "APPROVED", "PENDING_REVIEW", "REJECTED"}
+    if approval_status not in allowed:
+        raise ValueError(f"Invalid approval_status: {approval_status}")
+    with _conn() as c:
+        if approval_status == "MASTER":
+            c.execute("UPDATE social_media_assets SET approval_status = 'APPROVED' WHERE asset_type = 'avatar' AND approval_status = 'MASTER'")
+        c.execute("UPDATE social_media_assets SET approval_status = ? WHERE id = ?", (approval_status, asset_id))
+    return get_media_asset(asset_id)
+
+
+def delete_media_asset(asset_id: str, remove_file: bool = True) -> bool:
+    asset = get_media_asset(asset_id)
+    if not asset:
+        return False
+    fpath = asset.get("file_path") or ""
+    if remove_file and fpath and os.path.exists(fpath):
+        # Never delete the protected reference inside avatar_refs
+        if "/avatar_refs/" not in fpath:
+            try:
+                os.remove(fpath)
+            except Exception:
+                pass
+    with _conn() as c:
+        c.execute("DELETE FROM social_media_assets WHERE id = ?", (asset_id,))
+    return True
+
+
+def delete_social_post(post_id: str) -> bool:
+    post = get_social_post(post_id)
+    if not post:
+        return False
+    for mp in post.get("media_paths", []):
+        if mp and os.path.exists(mp) and "/renders/" in mp:
+            try:
+                os.remove(mp)
+            except Exception:
+                pass
+    with _conn() as c:
+        c.execute("DELETE FROM social_posts WHERE id = ?", (post_id,))
+    return True
 
 
 # ---------------------------------------------------------------------------

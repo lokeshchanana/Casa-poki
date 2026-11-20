@@ -1,28 +1,30 @@
 ---
 name: loki-avatar-studio
 description: >-
-  Guidelines and prompting system for Nadia Kapoor (Avatar Studio & Photo Curator)
-  to generate consistent Animated Avatars of Lokesh Chanana using Antigravity's
-  image-generator and curate/grade personal photos from Google Photos Picker.
+  Locked 2D flat-vector Character Bible and curation rules for Nadia Kapoor
+  (Avatar Studio & Photo Curator) to generate 100% identity-consistent avatars
+  of Lokesh Chanana using Antigravity's image-generator and manage Google Photos Picker assets.
 ---
 
-# Loki Avatar Studio & Photo Curation Skill
+# Loki 2D Vector Avatar Studio & Character Bible
 
-## 1. Master Reference & Storage Paths
-- **Primary Reference Photo:** `/home/lokesh/Casa-poki/real-estate/public/loki-profile.jpg`
-- **Animated Avatar Pack:** `/tank/social/avatars/`
-- **Curated Personal Photos (Google Photos Picker & Uploads):** `/tank/social/photos/`
+## 1. Master Reference & Storage Paths (MANDATORY)
+- **Locked Character Reference Crop:** `/tank/social/avatar_refs/loki_avatar_crop_ref.png`
+- **Full Reference Infographic:** `/tank/social/avatar_refs/loki_master_avatar_ref.png`
+- **Transparent Avatar Pack:** `/tank/social/avatars/` (all stored as clean transparent RGBA PNGs)
+- **Personal Photos (Google Photos Picker & Uploads):** `/tank/social/photos/`
 
-## 2. Antigravity `image-generator` Consistency Prompting
-Whenever generating a new animated avatar pose or seasonal outfit for Loki:
-1. Always pass `/home/lokesh/Casa-poki/real-estate/public/loki-profile.jpg` (and an existing approved avatar like `/tank/social/avatars/loki_avatar_welcome.png` when available) as reference.
-2. Lock the visual DNA:
-   - **Style:** *"Warm Pacific Northwest Editorial 3D-illustrated character, clean Pixar/editorial-inspired stylization, expressive eyes, neatly styled dark hair and trimmed beard matching the reference photo."*
-   - **Wardrobe:** *"Tailored architectural charcoal blazer (#1F2933) over a crisp warm ivory collared shirt (#FAF8F5)"* (or smart-casual PNW navy/charcoal sweater for casual Stories).
-   - **Background:** *"Solid clean warm ivory studio background (#FAF8F5)"* so Pillow/FFmpeg can cleanly frame or composite it.
-3. For **talking-head Reels**, generate matched pairs (`mouth closed` + `mouth open mid-sentence`) so `social_studio.py` can alternate frames dynamically with voiceover audio energy.
+## 2. Non-Negotiable Character Identity Bible (NEVER DEVIATE)
+Every single avatar pose MUST reference `/tank/social/avatar_refs/loki_avatar_crop_ref.png` directly so all poses share 100% identical features:
+- **Art Style:** Crisp **2D flat vector editorial cartoon illustration** with uniform dark-navy ink outlines (`#152538`) and clean flat cel-shading.
+  - **FORBIDDEN:** NEVER generate 3D Pixar, CGI, glossy airbrushed skin, photorealistic AI, or inconsistent face shapes.
+- **Hair:** Dark brown-black hair pulled back tightly into a neat **top-knot man bun** with short faded sides.
+- **Face & Beard:** Warm medium-tan skin tone, neatly trimmed full dark brown beard and connected mustache, warm friendly open-tooth smile.
+- **Signature Eyewear:** Sleek silver-frame **aviator sunglasses** with translucent dark charcoal-to-grey gradient lenses.
+- **Wardrobe:** Tailored dark charcoal-slate blazer (`#4A5560`) with tiny circular white `LC` monogram lapel pin on the left chest, open-collar white button-down shirt (no tie), dark charcoal trousers with black belt and silver buckle.
+- **Background & Transparency:** Generate on pure solid `#FFFFFF` white background with zero background icons/text, then flood-fill remove ONLY exterior white pixels from image edges (preserving his white shirt & teeth) into a transparent RGBA PNG.
 
-## 3. When to Use Real Photo vs. Animated Avatar
-- **Use Real Photo (`/tank/social/photos/`):** Authentic field moments, open houses, client closings, neighborhood walk-and-talks, personal stories, and high-trust testimonials. Always apply `editorial_grade(sat=0.72, contrast=1.05)` + `16%` Ivory/Charcoal split-tone.
-- **Use Animated Avatar (`/tank/social/avatars/`):** Weekly WA Market Pulse explainers, mortgage rate breakdowns, 3-step buyer/seller educational Reels, data-heavy carousels, and rapid-turnaround trend responses where filming wasn't possible.
-- **Hybrid:** Real Puget Sound home/neighborhood photo as the main canvas + Animated Avatar in a clean circular/corner presenter badge!
+## 3. Approval & Rejection Workflow
+- Every new generated avatar enters `/tank/social/avatars/` as `PENDING_REVIEW`.
+- Always visually inspect every generated avatar before presenting it to Lokesh. Discard any pose with drifted features or over-AI texture immediately.
+- Lokesh can click **Approve**, **Set Master**, or **Reject & Remove** inside **Social Studio → Avatars & Google Photos**. Rejected avatars are permanently deleted and never used.

@@ -1,13 +1,17 @@
 """
-Social Media Wing Tool Definitions & Execution Engine
-===================================================
+Social Media Wing Tool Definitions & Execution Engine (Static-First, Zero AI Audio)
+===================================================================================
 Provides all tools for Devon Brooks (social_scout), Nadia Kapoor (avatar_artist),
 Maya Reyes (marketing), Leo Bennett (content_producer), and Priya Nair (social_ops).
+
+POLICY:
+- Static image posts only until Lokesh's personal voice model is integrated (zero AI TTS).
+- Avatars strictly use Loki's locked 2D flat-vector character (never REJECTED avatars).
+- Human-in-the-loop gate: every post enters PENDING_APPROVAL.
 """
 
 import json
 import os
-import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -27,12 +31,12 @@ SOCIAL_TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "social_research_market_and_trends",
-            "description": "Devon Brooks saves a structured Washington Real Estate Market Update or Viral Social Format brief (with data points, 0-2s hook, beat sheet, and sources).",
+            "description": "Devon Brooks saves a structured Washington Real Estate Market Update or Viral Static Format brief (with data points, hook, slide/card outline, and sources).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "brief_type": {"type": "string", "enum": ["market_update", "viral_format", "hybrid"]},
-                    "region": {"type": "string", "description": "e.g., Greater Seattle, WA / King County / Pierce County"},
+                    "region": {"type": "string", "description": "e.g., King County / Kent, WA / Greater Seattle"},
                     "title": {"type": "string"},
                     "hook": {"type": "string"},
                     "data_points": {"type": "array", "items": {"type": "string"}},
@@ -59,7 +63,7 @@ SOCIAL_TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "social_list_media_assets",
-            "description": "Nadia Kapoor lists available Animated Avatars (/tank/social/avatars/) and Personal Photos (/tank/social/photos/) with usage counts and engagement stats.",
+            "description": "Nadia Kapoor lists available 2D Vector Avatars (/tank/social/avatars/) and Personal Photos (/tank/social/photos/) with approval status (MASTER, APPROVED, PENDING_REVIEW) and usage counts.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -72,27 +76,32 @@ SOCIAL_TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "social_render_content",
-            "description": "Leo Bennett renders branded social media creatives (1080x1350 IG Carousel, 1080x1920 IG Story, 1200x630 Facebook, 1200x675 X/Twitter, or 1080x1920 MP4 Reel/TikTok with animated avatar + Edge-TTS voiceover) and queues it as PENDING_APPROVAL.",
+            "description": "Leo Bennett renders STATIC branded social media graphics (1080x1350 IG Carousel/Post, 1080x1920 WA Market Infographic Poster, 1080x1920 IG Static Story, 1200x630 Facebook, 1200x675 X/Twitter — ZERO AI audio) and queues it as PENDING_APPROVAL.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "platform": {
                         "type": "string",
-                        "enum": ["instagram_carousel", "instagram_post", "instagram_reel", "instagram_story", "facebook", "tiktok", "twitter"],
+                        "enum": ["instagram_carousel", "instagram_post", "market_infographic", "instagram_story", "facebook", "twitter"],
                     },
                     "pillar": {"type": "string", "default": "market_update"},
                     "visual_mode": {"type": "string", "enum": ["animated_avatar", "real_photo", "hybrid"], "default": "animated_avatar"},
                     "kicker": {"type": "string", "description": "2-4 word ALL CAPS kicker badge"},
+                    "region": {"type": "string", "default": "King County • Kent, WA"},
                     "title": {"type": "string", "description": "Headline / Post Title"},
                     "subheadline": {"type": "string", "default": ""},
                     "hook": {"type": "string"},
                     "storyline": {"type": "string"},
                     "caption": {"type": "string", "description": "Full platform caption (zero AI tells, includes Real Broker LLC)"},
                     "hashtags": {"type": "string", "default": ""},
-                    "script_text": {"type": "string", "description": "Spoken script for Reels/TikToks"},
                     "cards": {
                         "type": "array",
                         "description": "For carousels: list of {title, body} objects",
+                        "items": {"type": "object"},
+                    },
+                    "stats": {
+                        "type": "array",
+                        "description": "For market_infographic: up to 3 {value, label, note} stat cards",
                         "items": {"type": "object"},
                     },
                     "bullet_points": {"type": "array", "items": {"type": "string"}},
@@ -127,7 +136,7 @@ SOCIAL_TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "social_compute_cadence",
-            "description": "Priya Nair analyzes historical post performance (by platform, pillar, and Real Photo vs. Animated Avatar) and updates the weekly Pacific Time posting cadence.",
+            "description": "Priya Nair analyzes historical post performance and updates the static-image Pacific Time weekly posting cadence.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -154,42 +163,39 @@ def _pick_visual_paths(visual_mode: str, asset_id: Optional[str] = None) -> Dict
     assets = social_db.list_media_assets()
     chosen_ids: List[str] = []
     primary = None
-    talking = None
-    bg_photo = None
 
     if asset_id:
         specific = social_db.get_media_asset(asset_id)
-        if specific and os.path.exists(specific["file_path"]):
+        if specific and specific.get("approval_status") != "REJECTED" and os.path.exists(specific["file_path"]):
             primary = specific["file_path"]
             chosen_ids.append(specific["id"])
 
-    avatars = [a for a in assets if a["asset_type"] == "avatar" and os.path.exists(a["file_path"])]
-    photos = [a for a in assets if a["asset_type"] == "photo" and os.path.exists(a["file_path"])]
+    # Filter out REJECTED assets and prioritize MASTER > APPROVED > PENDING_REVIEW
+    rank = {"MASTER": 0, "APPROVED": 1, "PENDING_REVIEW": 2}
+    avatars = sorted(
+        [a for a in assets if a["asset_type"] == "avatar" and a.get("approval_status") != "REJECTED" and os.path.exists(a["file_path"])],
+        key=lambda x: rank.get(x.get("approval_status", "PENDING_REVIEW"), 3),
+    )
+    photos = [
+        a for a in assets
+        if a["asset_type"] != "avatar" and a.get("approval_status") != "REJECTED" and os.path.exists(a["file_path"])
+    ]
 
     if visual_mode == "real_photo":
         if not primary and photos:
             primary = photos[0]["file_path"]
             chosen_ids.append(photos[0]["id"])
     else:
-        if not primary:
-            welcome = next((a for a in avatars if "welcome" in a["file_path"]), avatars[0] if avatars else None)
-            if welcome:
-                primary = welcome["file_path"]
-                chosen_ids.append(welcome["id"])
-        talk_a = next((a for a in avatars if "talking" in a["file_path"]), None)
-        if talk_a:
-            talking = talk_a["file_path"]
-        if visual_mode == "hybrid" and photos:
-            bg_photo = photos[0]["file_path"]
-            chosen_ids.append(photos[0]["id"])
+        if not primary and avatars:
+            primary = avatars[0]["file_path"]
+            chosen_ids.append(avatars[0]["id"])
 
-    return {"primary": primary, "talking": talking, "bg_photo": bg_photo, "asset_ids": chosen_ids}
+    return {"primary": primary, "asset_ids": chosen_ids}
 
 
 def _next_recommended_slot(platform: str) -> str:
     rules = social_db.list_cadence_rules()
     match = next((r for r in rules if r["platform"] == platform), None)
-    # Schedule 1-2 days out in Pacific Time (-08:00)
     now_local = datetime.utcnow() - timedelta(hours=8)
     target = (now_local + timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
     if match:
@@ -203,7 +209,6 @@ def _next_recommended_slot(platform: str) -> str:
 
 async def sync_analytics_and_reels() -> Dict[str, Any]:
     synced = 0
-    # 1. Seed/sync from website instagram_reels.json
     if os.path.exists(REELS_JSON_PATH):
         try:
             with open(REELS_JSON_PATH, "r", encoding="utf-8") as f:
@@ -214,9 +219,8 @@ async def sync_analytics_and_reels() -> Dict[str, Any]:
                     continue
                 tag = (r.get("tag") or "Property Walkthrough").lower()
                 pillar = "property_walkthrough" if "tour" in tag or "walkthrough" in tag else "market_update"
-                # Baseline tracked entry so cadence engine has historical context
                 social_db.record_analytics_metric(
-                    platform="instagram_reel",
+                    platform="instagram_post",
                     pillar=pillar,
                     visual_mode="real_photo",
                     external_id=f"ig_reel_{rid}",
@@ -233,7 +237,6 @@ async def sync_analytics_and_reels() -> Dict[str, Any]:
         except Exception:
             pass
 
-    # 2. Sync live Postiz posts if configured
     postiz_synced = 0
     postiz_res = await postiz_client.get_analytics(days=30)
     if postiz_res.get("ok"):
@@ -269,74 +272,64 @@ def compute_adaptive_cadence() -> Dict[str, Any]:
 
     rules = [
         {
-            "platform": "instagram_reel",
-            "day_of_week": "Tue",
-            "time_pt": "12:00",
-            "pillar": "market_update",
-            "recommended_format": "9:16 Talking Avatar Market Reel",
-            "preferred_visual_mode": "animated_avatar",
-            "confidence": 0.84,
-            "rationale": f"Midday Tue Pacific performs well for WA Market Pulse ({summary['total_tracked_posts']} tracked posts).",
-        },
-        {
-            "platform": "instagram_reel",
-            "day_of_week": "Thu",
-            "time_pt": "17:30",
-            "pillar": "property_walkthrough",
-            "recommended_format": "9:16 Property / Neighborhood Reel",
-            "preferred_visual_mode": "real_photo",
-            "confidence": 0.81,
-            "rationale": "Evening commute window pairs strongly with authentic Puget Sound home visuals.",
-        },
-        {
             "platform": "instagram_carousel",
             "day_of_week": "Mon",
             "time_pt": "08:30",
             "pillar": "buyer_seller_tip",
-            "recommended_format": "4:5 Editorial Ivory Carousel",
+            "recommended_format": "4:5 Editorial Ivory Carousel (Static)",
             "preferred_visual_mode": top_visual,
-            "confidence": 0.79,
-            "rationale": f"Leading visual mode ({top_visual}) assigned to Monday educational carousels.",
+            "confidence": 0.80,
+            "rationale": f"Static educational carousels drive strong bookmarks ({summary['total_tracked_posts']} tracked posts).",
+        },
+        {
+            "platform": "market_infographic",
+            "day_of_week": "Tue",
+            "time_pt": "12:00",
+            "pillar": "market_update",
+            "recommended_format": "9:16 WA Market Infographic Poster (Static)",
+            "preferred_visual_mode": "animated_avatar",
+            "confidence": 0.84,
+            "rationale": "Clean King/Pierce County stat cards + 2D vector Loki presenter (zero AI audio).",
         },
         {
             "platform": "instagram_story",
             "day_of_week": "Wed",
             "time_pt": "16:30",
             "pillar": "personal_story",
-            "recommended_format": "9:16 Interactive Poll Story",
+            "recommended_format": "9:16 Interactive Poll Story Card (Static)",
             "preferred_visual_mode": "real_photo",
             "confidence": 0.76,
-            "rationale": "Personal field photos drive Story replies and DM conversations.",
+            "rationale": "Personal field photos drive warm Story replies without sound.",
+        },
+        {
+            "platform": "instagram_post",
+            "day_of_week": "Thu",
+            "time_pt": "17:30",
+            "pillar": "property_walkthrough",
+            "recommended_format": "4:5 Neighborhood Spotlight Card (Static)",
+            "preferred_visual_mode": "real_photo",
+            "confidence": 0.78,
+            "rationale": "Evening commute window captures local Puget Sound home browsers.",
         },
         {
             "platform": "facebook",
             "day_of_week": "Sat",
             "time_pt": "10:30",
             "pillar": "open_house",
-            "recommended_format": "1.91:1 Community Highlight Card",
-            "preferred_visual_mode": "hybrid",
+            "recommended_format": "1.91:1 Community Highlight Card (Static)",
+            "preferred_visual_mode": "animated_avatar",
             "confidence": 0.75,
             "rationale": "Saturday morning catches local homeowner & open-house traffic.",
-        },
-        {
-            "platform": "tiktok",
-            "day_of_week": "Fri",
-            "time_pt": "18:00",
-            "pillar": "market_update",
-            "recommended_format": "9:16 Hook-First Short Video",
-            "preferred_visual_mode": "animated_avatar",
-            "confidence": 0.77,
-            "rationale": "Repurposed vertical market breakdown with kinetic captions.",
         },
         {
             "platform": "twitter",
             "day_of_week": "Wed",
             "time_pt": "08:00",
             "pillar": "market_update",
-            "recommended_format": "16:9 Data Card + Concise Take",
+            "recommended_format": "16:9 Data Card + Concise Take (Static)",
             "preferred_visual_mode": "animated_avatar",
-            "confidence": 0.73,
-            "rationale": "Morning PNW tech & finance audience engages with concise rate/price data.",
+            "confidence": 0.74,
+            "rationale": "Morning PNW tech & finance audience engages with concise rate/price visuals.",
         },
     ]
     saved = social_db.replace_cadence_rules(rules)
@@ -358,12 +351,11 @@ async def approve_and_schedule_post(
     if edited_caption is not None:
         social_db.update_social_post(post_id, caption=caption, scheduled_for=sched)
 
-    # Attempt Postiz dispatch if configured
     if postiz_client.is_configured():
         integ_resp = await postiz_client.list_integrations()
         integrations = integ_resp.get("integrations", []) if integ_resp.get("ok") else []
         target_integ = integration_id
-        provider_type = post["platform"].split("_")[0]
+        provider_type = "instagram" if post["platform"] == "market_infographic" else post["platform"].split("_")[0]
         if not target_integ and integrations:
             for ig in integrations:
                 ident = (ig.get("identifier") or ig.get("provider") or "").lower()
@@ -433,19 +425,35 @@ async def execute_social_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]
         return {"ok": True, "assets": social_db.list_media_assets(asset_type=atype)}
 
     if name == "social_render_content":
-        platform = args.get("platform", "instagram_carousel")
+        platform = args.get("platform", "market_infographic")
+        if platform in ("instagram_reel", "tiktok") and not social_studio.ALLOW_AI_AUDIO:
+            return {
+                "ok": False,
+                "error": "Video/AI-sound Reels and TikToks are paused until Lokesh's real voice model is connected. Use static formats: market_infographic, instagram_carousel, instagram_post, instagram_story, facebook, or twitter.",
+            }
+
         visual_mode = args.get("visual_mode", "animated_avatar")
         kicker = args.get("kicker", "WA MARKET PULSE")
-        title = args.get("title", "Greater Seattle Market Update")
+        title = args.get("title", "King County Housing Market Analysis")
         subheadline = args.get("subheadline", "")
         caption = args.get("caption", "")
-        script_text = args.get("script_text") or caption
         vis = _pick_visual_paths(visual_mode, args.get("asset_id"))
 
         media_paths: List[str] = []
-        if platform in ("instagram_carousel", "instagram_post"):
+        if platform == "market_infographic":
+            p = social_studio.render_market_infographic(
+                region=args.get("region") or kicker,
+                headline=title,
+                stats=args.get("stats") or [],
+                avatar_path=vis["primary"],
+            )
+            media_paths = [p]
+        elif platform in ("instagram_carousel", "instagram_post"):
+            short_body = args.get("storyline") or (caption.split("\n")[0].strip())
+            if len(short_body) > 155:
+                short_body = short_body[:155].rsplit(" ", 1)[0].rstrip(".,;:") + "."
             cards = args.get("cards") or [
-                {"title": "What Changed This Week", "body": args.get("storyline") or caption[:180]},
+                {"title": "What Changed This Week", "body": short_body},
                 {"title": "What It Means For You", "body": "Clear neighborhood math beats national headlines every time."},
             ]
             if platform == "instagram_post":
@@ -483,18 +491,6 @@ async def execute_social_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]
                 visual_mode=visual_mode,
             )
             media_paths = [p]
-        elif platform in ("instagram_reel", "tiktok"):
-            p = await social_studio.render_vertical_reel(
-                kicker=kicker,
-                headline=title,
-                script_text=script_text,
-                primary_visual_path=vis["primary"],
-                talking_visual_path=vis["talking"],
-                bg_photo_path=vis["bg_photo"],
-                visual_mode=visual_mode,
-                platform=platform,
-            )
-            media_paths = [p]
 
         compliance = social_studio.audit_social_post(caption, platform)
         sched = args.get("scheduled_for") or _next_recommended_slot(platform)
@@ -507,7 +503,7 @@ async def execute_social_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]
             hook=args.get("hook", ""),
             storyline=args.get("storyline", ""),
             hashtags=args.get("hashtags", ""),
-            script_text=script_text,
+            script_text="",
             media_paths=media_paths,
             asset_ids=vis["asset_ids"],
             status="PENDING_APPROVAL",

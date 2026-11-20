@@ -5,7 +5,6 @@ import {
   Edit3,
   Sparkles,
   Image as ImageIcon,
-  Video,
   BarChart3,
   CalendarClock,
   RefreshCw,
@@ -14,22 +13,24 @@ import {
   ShieldCheck,
   AlertTriangle,
   Send,
+  Star,
+  Trash2,
+  VolumeX,
 } from 'lucide-react';
 
 const PLATFORM_LABELS = {
-  instagram_carousel: 'IG Carousel (4:5)',
-  instagram_post: 'IG Feed Post (4:5)',
-  instagram_reel: 'IG Reel (9:16 MP4)',
-  instagram_story: 'IG Story (9:16)',
-  facebook: 'Facebook Post (1.91:1)',
-  tiktok: 'TikTok Video (9:16 MP4)',
-  twitter: 'X / Twitter (16:9)',
+  market_infographic: 'WA Market Infographic (9:16 Static)',
+  instagram_carousel: 'IG Carousel (4:5 Static)',
+  instagram_post: 'IG Feed Post (4:5 Static)',
+  instagram_story: 'IG Story Card (9:16 Static)',
+  facebook: 'Facebook Post (1.91:1 Static)',
+  twitter: 'X / Twitter Card (16:9 Static)',
 };
 
 const mediaUrl = (path) => `/api/manager/social/media-file?path=${encodeURIComponent(path)}`;
 
 export default function SocialStudio() {
-  const [subTab, setSubTab] = useState('queue'); // 'queue' | 'create' | 'media' | 'cadence'
+  const [subTab, setSubTab] = useState('media'); // Open on Avatars & Photos or Queue
   const [overview, setOverview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
@@ -38,16 +39,16 @@ export default function SocialStudio() {
   const [slideIdx, setSlideIdx] = useState({});
   const [toast, setToast] = useState(null);
 
-  // Create form state
+  // Create form state (Static Image Only — Zero AI Sound)
   const [form, setForm] = useState({
-    platform: 'instagram_carousel',
+    platform: 'market_infographic',
     visual_mode: 'animated_avatar',
     pillar: 'market_update',
     kicker: 'WA MARKET PULSE',
-    title: 'What $750k Buys in Greater Seattle Right Now',
-    subheadline: 'King & Pierce County Weekly Snapshot',
+    region: 'King County • Kent, WA',
+    title: 'King County Housing Market Analysis',
+    subheadline: 'Weekly Greater Seattle Snapshot',
     caption: '',
-    script_text: '',
     asset_id: '',
   });
   const [generating, setGenerating] = useState(false);
@@ -102,7 +103,7 @@ export default function SocialStudio() {
   };
 
   const handleRevise = async (postId) => {
-    const note = window.prompt('What should Maya & Leo change in this post?');
+    const note = window.prompt('What should Maya & Leo change in this static post?');
     if (!note) return;
     setBusyId(postId);
     try {
@@ -129,6 +130,50 @@ export default function SocialStudio() {
     }
   };
 
+  const handleDeletePost = async (postId) => {
+    setBusyId(postId);
+    try {
+      await fetch(`/api/manager/social/posts/${postId}`, { method: 'DELETE' });
+      showToast('Post deleted.');
+      fetchOverview();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleAssetStatus = async (assetId, status) => {
+    setBusyId(assetId);
+    try {
+      const res = await fetch(`/api/manager/social/assets/${assetId}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approval_status: status }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(status === 'MASTER' ? 'Locked as Master Avatar!' : `Marked ${status}`);
+        fetchOverview();
+      }
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleRejectAvatar = async (assetId, title) => {
+    if (!window.confirm(`Reject and permanently remove "${title}"?`)) return;
+    setBusyId(assetId);
+    try {
+      const res = await fetch(`/api/manager/social/assets/${assetId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(`Removed "${title}" from avatar library.`);
+        fetchOverview();
+      }
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const handleGenerate = async (e) => {
     e.preventDefault();
     setGenerating(true);
@@ -140,7 +185,7 @@ export default function SocialStudio() {
       });
       const data = await res.json();
       if (data.ok) {
-        showToast('Draft rendered & added to Approval Queue!');
+        showToast('Static graphic rendered & added to Approval Queue!');
         setSubTab('queue');
         setStatusFilter('PENDING_APPROVAL');
         fetchOverview();
@@ -204,7 +249,7 @@ export default function SocialStudio() {
     setLoading(true);
     try {
       await fetch('/api/manager/social/analytics/sync', { method: 'POST' });
-      showToast('Analytics synced & weekly cadence optimized!');
+      showToast('Analytics synced & static posting cadence optimized!');
       fetchOverview();
     } finally {
       setLoading(false);
@@ -216,7 +261,7 @@ export default function SocialStudio() {
   );
   const pendingCount = (overview?.posts || []).filter((p) => p.status === 'PENDING_APPROVAL').length;
   const assets = overview?.assets || [];
-  const avatars = assets.filter((a) => a.asset_type === 'avatar');
+  const avatars = assets.filter((a) => a.asset_type === 'avatar' && a.approval_status !== 'REJECTED');
   const photos = assets.filter((a) => a.asset_type !== 'avatar');
 
   return (
@@ -236,14 +281,19 @@ export default function SocialStudio() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-charcoal-dark p-5 rounded-2xl border border-silver/30 dark:border-silver/20 border-l-4 border-l-charcoal dark:border-l-silver">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-500 dark:text-silver-dark">
-            5-Agent Social Media Wing • Human-in-the-Loop Gate
-          </p>
-          <h2 className="text-2xl font-serif font-bold text-charcoal dark:text-silver mt-0.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-500 dark:text-silver-dark">
+              5-Agent Social Media Wing • Human-in-the-Loop Gate
+            </p>
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-ivory dark:bg-charcoal border border-silver/40 text-charcoal dark:text-silver">
+              <VolumeX className="w-3 h-3" /> Static Image Mode (Zero AI Sound)
+            </span>
+          </div>
+          <h2 className="text-2xl font-serif font-bold text-charcoal dark:text-silver mt-1">
             Social Media Studio & Approval Queue
           </h2>
           <p className="text-xs text-neutral-600 dark:text-silver-dark mt-1">
-            Devon Brooks (Market/Trends) • Nadia Kapoor (Avatars/Photos) • Maya Reyes (Storyline) • Leo Bennett (Content) • Priya Nair (Cadence)
+            Devon Brooks (Market/Trends) • Nadia Kapoor (2D Vector Avatars & Photos) • Maya Reyes (Storyline) • Leo Bennett (Static Graphics) • Priya Nair (Cadence)
           </p>
         </div>
 
@@ -275,10 +325,10 @@ export default function SocialStudio() {
       {/* Sub-Navigation */}
       <div className="flex flex-wrap gap-2">
         {[
-          { id: 'queue', label: `Approval Queue (${pendingCount})`, icon: ShieldCheck },
-          { id: 'create', label: 'Create & Research', icon: Sparkles },
-          { id: 'media', label: `Avatars & Google Photos (${assets.length})`, icon: ImageIcon },
-          { id: 'cadence', label: 'Analytics & Cadence', icon: BarChart3 },
+          { id: 'media', label: `Review Avatars & Photos (${avatars.length} Avatars)`, icon: ImageIcon },
+          { id: 'queue', label: `Post Approval Queue (${pendingCount})`, icon: ShieldCheck },
+          { id: 'create', label: 'Create Static Post & Research', icon: Sparkles },
+          { id: 'cadence', label: 'Analytics & Static Cadence', icon: BarChart3 },
         ].map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -295,11 +345,142 @@ export default function SocialStudio() {
         ))}
       </div>
 
-      {/* TAB 1: APPROVAL QUEUE */}
+      {/* TAB 1: AVATARS & GOOGLE PHOTOS (WITH APPROVE / SET MASTER / REJECT) */}
+      {subTab === 'media' && (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-charcoal-dark p-5 rounded-2xl border border-silver/30 flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h3 className="font-serif font-bold text-lg text-charcoal dark:text-silver">
+                Nadia Kapoor — Locked 2D Vector Avatar Pack & Google Photos
+              </h3>
+              <p className="text-xs text-neutral-500 mt-0.5">
+                All poses are locked to your exact 2D flat-vector identity (man bun, beard, aviator sunglasses, charcoal suit with LC pin). Approve favorites or Reject & Remove any you dislike.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={handleGooglePhotosPick}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-charcoal text-ivory dark:bg-silver dark:text-charcoal"
+              >
+                <ImageIcon className="w-4 h-4" />
+                <span>Import from Google Photos</span>
+              </button>
+              <label className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border border-charcoal/30 dark:border-silver/30 cursor-pointer hover:bg-neutral-100 dark:hover:bg-charcoal">
+                <Upload className="w-4 h-4" />
+                <span>Upload Photo</span>
+                <input type="file" accept="image/*" onChange={handleUploadPhoto} className="hidden" />
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-3">
+              2D Vector Avatars ({avatars.length}) — Approve or Reject Each Pose
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {avatars.map((a) => {
+                const st = a.approval_status || 'PENDING_REVIEW';
+                return (
+                  <div
+                    key={a.id}
+                    className="bg-white dark:bg-charcoal-dark rounded-2xl border border-silver/30 overflow-hidden flex flex-col"
+                  >
+                    <div className="relative bg-ivory dark:bg-charcoal p-4 flex items-center justify-center h-72">
+                      <img
+                        src={mediaUrl(a.file_path)}
+                        alt={a.title}
+                        className="max-h-64 object-contain drop-shadow-sm"
+                      />
+                      <span
+                        className={`absolute top-3 right-3 text-[10px] font-bold px-2.5 py-1 rounded-full ${
+                          st === 'MASTER'
+                            ? 'bg-indigo-600 text-white'
+                            : st === 'APPROVED'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-amber-100 text-amber-800 border border-amber-300'
+                        }`}
+                      >
+                        {st === 'MASTER' ? '★ MASTER REF' : st.replace('_', ' ')}
+                      </span>
+                    </div>
+                    <div className="p-4 space-y-3">
+                      <div>
+                        <p className="text-sm font-serif font-bold text-charcoal dark:text-silver truncate">
+                          {a.title}
+                        </p>
+                        <p className="text-[11px] text-neutral-500">Transparent PNG • Used {a.usage_count}x</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {st !== 'APPROVED' && st !== 'MASTER' && (
+                          <button
+                            disabled={busyId === a.id}
+                            onClick={() => handleAssetStatus(a.id, 'APPROVED')}
+                            className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Approve</span>
+                          </button>
+                        )}
+                        {st !== 'MASTER' && (
+                          <button
+                            disabled={busyId === a.id}
+                            onClick={() => handleAssetStatus(a.id, 'MASTER')}
+                            className="inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl text-xs font-bold border border-indigo-300 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+                            title="Lock as Master Reference"
+                          >
+                            <Star className="w-3.5 h-3.5" />
+                            <span>Master</span>
+                          </button>
+                        )}
+                        <button
+                          disabled={busyId === a.id}
+                          onClick={() => handleRejectAvatar(a.id, a.title)}
+                          className="inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl text-xs font-bold text-rose-600 border border-rose-200 hover:bg-rose-50 dark:border-rose-900/50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Reject</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-3">
+              My Personal Photos ({photos.length})
+            </h4>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {photos.map((a) => (
+                <div key={a.id} className="bg-white dark:bg-charcoal-dark rounded-xl border border-silver/30 overflow-hidden">
+                  <img src={mediaUrl(a.file_path)} alt={a.title} className="w-full h-56 object-cover" />
+                  <div className="p-3 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold truncate">{a.title}</p>
+                      <p className="text-[10px] text-neutral-500 mt-0.5">{a.source} • Used {a.usage_count}x</p>
+                    </div>
+                    <button
+                      onClick={() => handleRejectAvatar(a.id, a.title)}
+                      className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg"
+                      title="Remove photo"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: POST APPROVAL QUEUE */}
       {subTab === 'queue' && (
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2">
-            {['PENDING_APPROVAL', 'APPROVED', 'SCHEDULED_POSTIZ', 'REVISION_REQUESTED', 'ALL'].map((st) => (
+            {['PENDING_APPROVAL', 'APPROVED', 'SCHEDULED_POSTIZ', 'REVISION_REQUESTED', 'REJECTED', 'ALL'].map((st) => (
               <button
                 key={st}
                 onClick={() => setStatusFilter(st)}
@@ -320,7 +501,7 @@ export default function SocialStudio() {
                 No posts in {statusFilter.replace('_', ' ')}
               </p>
               <p className="text-xs text-neutral-500">
-                Use "Create & Research" or ask Marcus Vance in the Manager tab to generate a campaign.
+                Use "Create Static Post & Research" or ask Marcus Vance in the Manager tab to draft a new post.
               </p>
             </div>
           ) : (
@@ -329,7 +510,6 @@ export default function SocialStudio() {
                 const media = post.media_paths || [];
                 const curSlide = Math.min(slideIdx[post.id] || 0, Math.max(media.length - 1, 0));
                 const activeFile = media[curSlide];
-                const isVideo = activeFile && activeFile.endsWith('.mp4');
                 const comp = post.compliance || {};
 
                 return (
@@ -343,7 +523,7 @@ export default function SocialStudio() {
                           {PLATFORM_LABELS[post.platform] || post.platform}
                         </span>
                         <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-neutral-500">
-                          {post.visual_mode === 'animated_avatar' ? '🎭 Animated Avatar' : '📸 Real Photo'}
+                          {post.visual_mode === 'animated_avatar' ? 'Vector Avatar' : 'Real Photo'}
                         </span>
                       </div>
                       <span
@@ -359,22 +539,13 @@ export default function SocialStudio() {
                       </span>
                     </div>
 
-                    {/* Media Preview */}
                     {activeFile && (
                       <div className="bg-ivory dark:bg-charcoal p-4 flex flex-col items-center">
-                        {isVideo ? (
-                          <video
-                            src={mediaUrl(activeFile)}
-                            controls
-                            className="max-h-96 rounded-xl border border-silver/30 shadow-sm"
-                          />
-                        ) : (
-                          <img
-                            src={mediaUrl(activeFile)}
-                            alt={post.title}
-                            className="max-h-96 object-contain rounded-xl border border-silver/30 shadow-sm"
-                          />
-                        )}
+                        <img
+                          src={mediaUrl(activeFile)}
+                          alt={post.title}
+                          className="max-h-[28rem] object-contain rounded-xl border border-silver/30 shadow-sm"
+                        />
                         {media.length > 1 && (
                           <div className="flex items-center gap-2 mt-3">
                             {media.map((_, idx) => (
@@ -395,7 +566,6 @@ export default function SocialStudio() {
                       </div>
                     )}
 
-                    {/* Copy & Metadata */}
                     <div className="p-4 space-y-3 flex-1">
                       <h3 className="font-serif font-bold text-base text-charcoal dark:text-silver">
                         {post.title}
@@ -425,35 +595,46 @@ export default function SocialStudio() {
                       </div>
                     </div>
 
-                    {/* Actions */}
-                    {post.status === 'PENDING_APPROVAL' && (
-                      <div className="p-4 border-t border-silver/20 flex flex-wrap gap-2">
+                    <div className="p-4 border-t border-silver/20 flex flex-wrap gap-2">
+                      {post.status === 'PENDING_APPROVAL' && (
+                        <>
+                          <button
+                            disabled={busyId === post.id}
+                            onClick={() => handleApprove(post)}
+                            className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Approve & Schedule</span>
+                          </button>
+                          <button
+                            disabled={busyId === post.id}
+                            onClick={() => handleRevise(post.id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold border border-silver/40 hover:bg-neutral-100 dark:hover:bg-charcoal"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>Revise</span>
+                          </button>
+                          <button
+                            disabled={busyId === post.id}
+                            onClick={() => handleReject(post.id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold text-rose-600 border border-rose-200 hover:bg-rose-50 dark:border-rose-900/50"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Reject</span>
+                          </button>
+                        </>
+                      )}
+                      {post.status !== 'PENDING_APPROVAL' && (
                         <button
                           disabled={busyId === post.id}
-                          onClick={() => handleApprove(post)}
-                          className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+                          onClick={() => handleDeletePost(post.id)}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-rose-600 border border-rose-200 hover:bg-rose-50"
                         >
-                          <CheckCircle2 className="w-4 h-4" />
-                          <span>Approve & Schedule</span>
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete</span>
                         </button>
-                        <button
-                          disabled={busyId === post.id}
-                          onClick={() => handleRevise(post.id)}
-                          className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold border border-silver/40 hover:bg-neutral-100 dark:hover:bg-charcoal"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                          <span>Revise</span>
-                        </button>
-                        <button
-                          disabled={busyId === post.id}
-                          onClick={() => handleReject(post.id)}
-                          className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold text-rose-600 border border-rose-200 hover:bg-rose-50 dark:border-rose-900/50"
-                        >
-                          <XCircle className="w-3.5 h-3.5" />
-                          <span>Reject</span>
-                        </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -462,19 +643,24 @@ export default function SocialStudio() {
         </div>
       )}
 
-      {/* TAB 2: CREATE & RESEARCH */}
+      {/* TAB 3: CREATE STATIC POST & RESEARCH */}
       {subTab === 'create' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <form
             onSubmit={handleGenerate}
             className="bg-white dark:bg-charcoal-dark p-5 rounded-2xl border border-silver/30 space-y-4"
           >
-            <h3 className="font-serif font-bold text-lg text-charcoal dark:text-silver">
-              Quick Studio Generator (Maya + Leo)
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="font-serif font-bold text-lg text-charcoal dark:text-silver">
+                Static Post Generator (Zero AI Sound)
+              </h3>
+              <span className="text-[10px] font-bold px-2 py-1 rounded bg-ivory dark:bg-charcoal border border-silver/30">
+                Voice Reels Paused
+              </span>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-[11px] font-bold uppercase mb-1">Platform & Format</label>
+                <label className="block text-[11px] font-bold uppercase mb-1">Static Format</label>
                 <select
                   value={form.platform}
                   onChange={(e) => setForm({ ...form, platform: e.target.value })}
@@ -488,25 +674,24 @@ export default function SocialStudio() {
                 </select>
               </div>
               <div>
-                <label className="block text-[11px] font-bold uppercase mb-1">Visual Mode</label>
+                <label className="block text-[11px] font-bold uppercase mb-1">Visual Source</label>
                 <select
                   value={form.visual_mode}
                   onChange={(e) => setForm({ ...form, visual_mode: e.target.value })}
                   className="w-full text-xs p-2.5 rounded-lg bg-ivory dark:bg-charcoal border border-silver/30"
                 >
-                  <option value="animated_avatar">🎭 Animated Avatar (Loki)</option>
-                  <option value="real_photo">📸 Real Photo (Google Photos)</option>
-                  <option value="hybrid">✨ Hybrid (Photo BG + Avatar)</option>
+                  <option value="animated_avatar">2D Vector Avatar (Loki)</option>
+                  <option value="real_photo">Real Photo (Google Photos)</option>
                 </select>
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-[11px] font-bold uppercase mb-1">Kicker Badge</label>
+                <label className="block text-[11px] font-bold uppercase mb-1">Region / Kicker</label>
                 <input
-                  value={form.kicker}
-                  onChange={(e) => setForm({ ...form, kicker: e.target.value })}
+                  value={form.region}
+                  onChange={(e) => setForm({ ...form, region: e.target.value, kicker: e.target.value })}
                   className="w-full text-xs p-2.5 rounded-lg bg-ivory dark:bg-charcoal border border-silver/30"
                 />
               </div>
@@ -517,12 +702,14 @@ export default function SocialStudio() {
                   onChange={(e) => setForm({ ...form, asset_id: e.target.value })}
                   className="w-full text-xs p-2.5 rounded-lg bg-ivory dark:bg-charcoal border border-silver/30"
                 >
-                  <option value="">Auto-select best match</option>
-                  {assets.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      [{a.asset_type}] {a.title}
-                    </option>
-                  ))}
+                  <option value="">Auto-select Master / Approved</option>
+                  {assets
+                    .filter((a) => a.approval_status !== 'REJECTED')
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        [{a.approval_status || a.asset_type}] {a.title}
+                      </option>
+                    ))}
                 </select>
               </div>
             </div>
@@ -538,13 +725,13 @@ export default function SocialStudio() {
 
             <div>
               <label className="block text-[11px] font-bold uppercase mb-1">
-                Voiceover Script / Storyline (optional override)
+                Caption (optional — warm PNW voice auto-drafted if blank)
               </label>
               <textarea
                 rows={3}
-                value={form.script_text}
-                onChange={(e) => setForm({ ...form, script_text: e.target.value })}
-                placeholder="Leave blank for automatic PNW neighborly script..."
+                value={form.caption}
+                onChange={(e) => setForm({ ...form, caption: e.target.value })}
+                placeholder="Leave blank for automatic neighborly WA caption..."
                 className="w-full text-xs p-2.5 rounded-lg bg-ivory dark:bg-charcoal border border-silver/30"
               />
             </div>
@@ -555,17 +742,16 @@ export default function SocialStudio() {
               className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-bold bg-charcoal text-ivory dark:bg-silver dark:text-charcoal disabled:opacity-50"
             >
               <Send className="w-4 h-4" />
-              <span>{generating ? 'Rendering Asset & Audio...' : 'Render & Send to Approval Queue'}</span>
+              <span>{generating ? 'Rendering Static Graphic...' : 'Render Static Post & Send to Queue'}</span>
             </button>
           </form>
 
-          {/* Devon Brooks Research Briefs */}
           <div className="bg-white dark:bg-charcoal-dark p-5 rounded-2xl border border-silver/30 space-y-3">
             <h3 className="font-serif font-bold text-lg text-charcoal dark:text-silver">
               Devon Brooks — WA Market & Viral Briefs
             </h3>
             <p className="text-xs text-neutral-500">
-              Ask Marcus Vance in the Manager tab to run a fresh Greater Seattle market update or scout viral Reels formats anytime.
+              Ask Marcus Vance in the Manager tab to run a fresh Greater Seattle market update or scout viral carousel/infographic formats anytime.
             </p>
             <div className="space-y-3 max-h-96 overflow-y-auto">
               {(overview?.briefs || []).length === 0 ? (
@@ -587,79 +773,14 @@ export default function SocialStudio() {
         </div>
       )}
 
-      {/* TAB 3: AVATARS & GOOGLE PHOTOS */}
-      {subTab === 'media' && (
-        <div className="space-y-6">
-          <div className="bg-white dark:bg-charcoal-dark p-5 rounded-2xl border border-silver/30 flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h3 className="font-serif font-bold text-lg text-charcoal dark:text-silver">
-                Nadia Kapoor — Animated Avatar Pack & Google Photos Library
-              </h3>
-              <p className="text-xs text-neutral-500 mt-0.5">
-                Avatars are generated via Antigravity grounded on your likeness. Import real photos from Google Photos or upload directly.
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={handleGooglePhotosPick}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-charcoal text-ivory dark:bg-silver dark:text-charcoal"
-              >
-                <ImageIcon className="w-4 h-4" />
-                <span>Import from Google Photos</span>
-              </button>
-              <label className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border border-charcoal/30 dark:border-silver/30 cursor-pointer hover:bg-neutral-100 dark:hover:bg-charcoal">
-                <Upload className="w-4 h-4" />
-                <span>Upload Photo</span>
-                <input type="file" accept="image/*" onChange={handleUploadPhoto} className="hidden" />
-              </label>
-            </div>
-          </div>
-
-          <div>
-            <h4 className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-3">
-              Animated Avatar Pack ({avatars.length})
-            </h4>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {avatars.map((a) => (
-                <div key={a.id} className="bg-white dark:bg-charcoal-dark rounded-xl border border-silver/30 overflow-hidden">
-                  <img src={mediaUrl(a.file_path)} alt={a.title} className="w-full h-56 object-cover" />
-                  <div className="p-3">
-                    <p className="text-xs font-bold truncate">{a.title}</p>
-                    <p className="text-[10px] text-neutral-500 mt-0.5">Used {a.usage_count}x</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <h4 className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-3">
-              My Personal Photos ({photos.length})
-            </h4>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {photos.map((a) => (
-                <div key={a.id} className="bg-white dark:bg-charcoal-dark rounded-xl border border-silver/30 overflow-hidden">
-                  <img src={mediaUrl(a.file_path)} alt={a.title} className="w-full h-56 object-cover" />
-                  <div className="p-3">
-                    <p className="text-xs font-bold truncate">{a.title}</p>
-                    <p className="text-[10px] text-neutral-500 mt-0.5">{a.source} • Used {a.usage_count}x</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* TAB 4: ANALYTICS & CADENCE */}
       {subTab === 'cadence' && (
         <div className="space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-4 bg-white dark:bg-charcoal-dark p-5 rounded-2xl border border-silver/30">
             <div>
-              <h3 className="font-serif font-bold text-lg">Priya Nair — Analytics & Weekly Cadence</h3>
+              <h3 className="font-serif font-bold text-lg">Priya Nair — Analytics & Static Posting Cadence</h3>
               <p className="text-xs text-neutral-500">
-                Tracked Posts: {overview?.analytics?.total_tracked_posts || 0} • Postiz:{' '}
-                {overview?.postiz?.api_key_configured ? 'Connected' : 'Ready for API Key'}
+                Tracked Posts: {overview?.analytics?.total_tracked_posts || 0} • Audio/Video Reels Paused (Static Focus)
               </p>
             </div>
             <button
@@ -675,10 +796,10 @@ export default function SocialStudio() {
             <table className="w-full text-left text-xs">
               <thead className="bg-ivory dark:bg-charcoal border-b border-silver/20 uppercase text-[10px] tracking-wider">
                 <tr>
-                  <th className="p-3.5">Platform</th>
+                  <th className="p-3.5">Static Format</th>
                   <th className="p-3.5">Day & Time (PT)</th>
                   <th className="p-3.5">Content Pillar</th>
-                  <th className="p-3.5">Format</th>
+                  <th className="p-3.5">Recommended Asset</th>
                   <th className="p-3.5">Visual Mode</th>
                   <th className="p-3.5">Rationale</th>
                 </tr>
@@ -691,7 +812,7 @@ export default function SocialStudio() {
                     <td className="p-3.5">{c.pillar}</td>
                     <td className="p-3.5">{c.recommended_format}</td>
                     <td className="p-3.5">
-                      {c.preferred_visual_mode === 'animated_avatar' ? '🎭 Animated Avatar' : c.preferred_visual_mode === 'real_photo' ? '📸 Real Photo' : '✨ Hybrid'}
+                      {c.preferred_visual_mode === 'animated_avatar' ? '2D Vector Avatar' : c.preferred_visual_mode === 'real_photo' ? 'Real Photo' : 'Hybrid'}
                     </td>
                     <td className="p-3.5 text-neutral-500">{c.rationale}</td>
                   </tr>
