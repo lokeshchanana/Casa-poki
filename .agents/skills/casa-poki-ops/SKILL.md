@@ -52,4 +52,5 @@ Before committing or pushing to `origin`:
 ## 4. Service & Tank Inventory
 
 - **Repo services**: `adguard`, `agents`, `ai`, `bigcapital`, `checkin`, `cloudflared`, `habridge`, `mic-bridge`, `monitor`, `music-assistant`, `nginx`, `ollama`, `postgres-db`, `real-estate`, `relaticle`, `twenty`
-- **Tank datasets (`/tank/`)**: `adguard`, `agents`, `antigravity-backup`, `bigcapital`, `cloudflared`, `habridge`, `mic-bridge`, `monitor`, `music-assistant`, `n8n`, `npm`, `ollama`, `postgres-db`, `re_office_data`, `relaticle`, `twenty`
+- **Tank datasets (`/tank/`)**: `adguard`, `agents`, `antigravity-backup`, `bigcapital`, `cloudflared`, `habridge`, `mic-bridge`, `monitor`, `music-assistant`, `n8n` (retired/archived), `npm`, `ollama`, `postgres-db`, `re_office_data`, `relaticle`, `twenty`
+- **Uptime Kuma Synchronization**: After any service addition, retirement, or port/URL change, update `scripts/sync-uptime-kuma.py` and execute `sudo python3 scripts/sync-uptime-kuma.py` to keep Uptime Kuma in sync.
