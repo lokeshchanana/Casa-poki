@@ -39,9 +39,12 @@ from tools import (
 )
 import social_db
 from social_router import router as social_router
+from webhooks_router import router as webhooks_router
+from brevo_sync import sync_twenty_to_brevo
 
 app = FastAPI(title="Multi-Agent Manager Hub (Manager + IT + Auditor + Social Studio)")
 app.include_router(social_router)
+app.include_router(webhooks_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -338,3 +341,17 @@ async def webhook_communication_intake(req: Request) -> JSONResponse:
         body = {}
     result = await handle_communication_intake(body)
     return JSONResponse(content=result)
+
+
+@app.on_event("startup")
+async def _start_brevo_sync_scheduler() -> None:
+    async def _loop() -> None:
+        await asyncio.sleep(60)
+        while True:
+            try:
+                await sync_twenty_to_brevo()
+            except Exception as exc:
+                print(f"[brevo_sync] Scheduled sync error: {exc}")
+            await asyncio.sleep(6 * 3600)
+
+    asyncio.create_task(_loop())

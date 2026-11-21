@@ -53,14 +53,38 @@ def _sanitize_filename(val: str) -> str:
     return clean.strip("_")[:60] or "unknown"
 
 
+GOOGLE_OAUTH_PATH = os.environ.get("GOOGLE_OAUTH_PATH", "/tank/agents/google_oauth.json")
+
+
 def _get_gdrive_access_token() -> Optional[str]:
     """
-    Attempts to obtain a valid Google Drive OAuth2 access token from environment
-    or n8n's Google Drive credential (PVRaEmYtHs1CwEDo).
+    Obtains a valid Google Drive OAuth2 access token from environment,
+    /tank/agents/google_oauth.json, or n8n's legacy SQLite store.
     """
     env_token = os.environ.get("GDRIVE_ACCESS_TOKEN", "").strip()
     if env_token:
         return env_token
+
+    if os.path.exists(GOOGLE_OAUTH_PATH):
+        try:
+            d = json.load(open(GOOGLE_OAUTH_PATH))
+            rt = (d.get("refresh_token") or "").strip()
+            cl = (d.get("client_id") or "").strip()
+            cs = (d.get("client_secret") or "").strip()
+            if rt and cl and cs:
+                form = urllib.parse.urlencode({
+                    "client_id": cl,
+                    "client_secret": cs,
+                    "refresh_token": rt,
+                    "grant_type": "refresh_token",
+                }).encode()
+                req = urllib.request.Request("https://oauth2.googleapis.com/token", data=form)
+                with urllib.request.urlopen(req, timeout=8) as r:
+                    resp = json.loads(r.read().decode())
+                    if resp.get("access_token"):
+                        return resp["access_token"]
+        except Exception:
+            pass
 
     try:
         if not os.path.exists(N8N_CONFIG_PATH) or not os.path.exists(N8N_DB_PATH):

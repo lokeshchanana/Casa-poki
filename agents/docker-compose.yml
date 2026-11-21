@@ -23,6 +23,7 @@ services:
       - POSTIZ_BASE_URL=http://192.168.1.240:4007/api/public/v1
     volumes:
       - /tank/n8n:/tank/n8n:ro
+      - /tank/agents/google_oauth.json:/tank/agents/google_oauth.json
       - /tank/monitor:/tank/monitor:ro
       - /tank/bigcapital/tax_vault:/tank/bigcapital/tax_vault
       - /tank/social:/tank/social

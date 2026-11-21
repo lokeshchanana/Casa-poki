@@ -290,7 +290,7 @@ export default function OpenHouseSignIn({ onOpenCrm }) {
     };
 
     try {
-      const webhookUrl = 'https://n8n.lokeshchanana.com/webhook/open-house-sign-in';
+      const webhookUrl = '/api/manager/webhook/open-house-sign-in';
       const res = await fetch(webhookUrl, {
         method: 'POST',
         headers: {
