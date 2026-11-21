@@ -226,9 +226,7 @@ export default function CrmChat({ onBackToCheckIn }) {
     const controller = new AbortController();
     setAbortController(controller);
 
-    const webhookUrl = (window.location.origin.includes('checkin.lokeshchanana.com') || window.location.origin.includes('192.168.1.240') || window.location.port === '8091')
-      ? '/api/crm-chat'
-      : 'https://n8n.lokeshchanana.com/webhook/relaticle-crm-chat/chat';
+    const webhookUrl = '/api/manager/chat';
 
     try {
       const response = await fetch(webhookUrl, {

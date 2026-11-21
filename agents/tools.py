@@ -2526,25 +2526,13 @@ async def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             return res
 
     except Exception as direct_err:
-        logger.warning(f"Direct Twenty CRM call failed for '{name}': {direct_err}. Attempting n8n fallback...")
-        # Fallback to n8n if direct Twenty call encountered network or unexpected error
-        try:
-            payload = {"tool": name, **args}
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(N8N_CRM_GATEWAY_URL, json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-                data["duration_ms"] = int((time.time() - start_ts) * 1000)
-                data["fallback_used"] = True
-                data["raw_payload_sent"] = args
-                return data
-        except Exception as fb_err:
-            return {
-                "ok": False,
-                "tool": name,
-                "error": f"Direct call failed: {direct_err}; Fallback failed: {fb_err}",
-                "duration_ms": int((time.time() - start_ts) * 1000),
-            }
+        logger.warning(f"Direct Twenty CRM call failed for '{name}': {direct_err}")
+        return {
+            "ok": False,
+            "tool": name,
+            "error": f"Direct Twenty CRM call failed: {direct_err}",
+            "duration_ms": int((time.time() - start_ts) * 1000),
+        }
 
     return {"ok": False, "tool": name, "error": f"Unsupported tool: {name}"}
 

@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import re
@@ -855,19 +856,18 @@ def log_request_flow(
     payload_str = json.dumps(payload_preview) if isinstance(payload_preview, (dict, list)) else str(payload_preview or "")
     resolved_cat = category or categorize_request_flow(source, title, agents_involved, payload_preview)
 
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT OR REPLACE INTO request_flows (
-            flow_id, source, title, status, agents_involved, steps, payload_preview, result_summary, duration_ms, category, created_at
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT OR REPLACE INTO request_flows (
+                flow_id, source, title, status, agents_involved, steps, payload_preview, result_summary, duration_ms, category, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (flow_id, source, title, status, agents_json, steps_json, payload_str, result_summary or "", duration_ms, resolved_cat, now),
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (flow_id, source, title, status, agents_json, steps_json, payload_str, result_summary or "", duration_ms, resolved_cat, now),
-    )
-    conn.commit()
-    conn.close()
+        conn.commit()
 
 
 def _backfill_flow_categories(conn: sqlite3.Connection) -> None:
@@ -895,10 +895,6 @@ def get_recent_request_flows(
     search: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     init_store()
-    conn = sqlite3.connect(DB_PATH)
-    _backfill_flow_categories(conn)
-    cur = conn.cursor()
-
     where_clauses = []
     params: List[Any] = []
 
@@ -922,18 +918,20 @@ def get_recent_request_flows(
     safe_limit = max(1, min(int(limit or 200), 500))
     params.append(safe_limit)
 
-    cur.execute(
-        f"""
-        SELECT flow_id, source, title, status, agents_involved, steps, payload_preview, result_summary, duration_ms, category, created_at
-        FROM request_flows
-        {where_sql}
-        ORDER BY id DESC
-        LIMIT ?
-        """,
-        params,
-    )
-    rows = cur.fetchall()
-    conn.close()
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        _backfill_flow_categories(conn)
+        cur = conn.cursor()
+        cur.execute(
+            f"""
+            SELECT flow_id, source, title, status, agents_involved, steps, payload_preview, result_summary, duration_ms, category, created_at
+            FROM request_flows
+            {where_sql}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            params,
+        )
+        rows = cur.fetchall()
 
     flows = []
     for r in rows:
@@ -969,12 +967,10 @@ def get_recent_request_flows(
 def get_request_flow_stats() -> Dict[str, Any]:
     """Returns total count, per-category counts, and per-agent counts across all logged flows."""
     init_store()
-    conn = sqlite3.connect(DB_PATH)
-    _backfill_flow_categories(conn)
-    cur = conn.cursor()
-
-    rows = cur.execute("SELECT category, agents_involved FROM request_flows").fetchall()
-    conn.close()
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        _backfill_flow_categories(conn)
+        cur = conn.cursor()
+        rows = cur.execute("SELECT category, agents_involved FROM request_flows").fetchall()
 
     category_counts: Dict[str, int] = {}
     agent_counts: Dict[str, int] = {}

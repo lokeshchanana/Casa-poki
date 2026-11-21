@@ -25,12 +25,12 @@ import {
 
 const SUGGESTED_PROMPTS = [
   {
-    label: 'Inspect n8n Workflows',
-    prompt: 'What workflows are currently available in n8n?'
+    label: 'Run CPA Tax Audit',
+    prompt: 'Ask Victor Sterling to run a full tax audit on Fiona\'s expenses'
   },
   {
-    label: 'CRM Lookup (Active n8n)',
-    prompt: 'Search for contacts named Surbhi in Relaticle CRM'
+    label: 'CRM Contact Lookup',
+    prompt: 'Search for contacts in Twenty CRM'
   },
   {
     label: 'Test Missing Workflow (GBP)',
@@ -598,7 +598,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
             <p className="text-[11px] text-neutral-500 dark:text-neutral-400 flex items-center gap-2 flex-wrap">
               <span className="inline-flex items-center gap-1">
                 <Workflow className="w-3 h-3 text-cyan-600 dark:text-cyan-400" />
-                {activeWorkflowsCount} Active n8n Workflows
+                Agent Hub Native Tools
               </span>
               <span>•</span>
               <span className="inline-flex items-center gap-1">
@@ -631,10 +631,10 @@ export default function ManagerChat({ onBackToCheckIn }) {
                 ? 'bg-cyan-600 text-white border-cyan-600'
                 : 'bg-white dark:bg-charcoal border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:border-cyan-500'
             }`}
-            title="Inspect IT Agent's n8n Workflow Catalog"
+            title="Inspect Agent Tool & Webhook Registry"
           >
             <Workflow className="w-3.5 h-3.5" />
-            <span>n8n ({activeWorkflowsCount})</span>
+            <span>Tools ({activeWorkflowsCount})</span>
           </button>
 
           <button

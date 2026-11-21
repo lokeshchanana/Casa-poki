@@ -45,17 +45,7 @@ UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 
 
 def _normalize_phone(num: Any) -> str:
-    if not num:
-        return ""
-    s = str(num).strip()
-    if s.startswith("+"):
-        return "+" + re.sub(r"[^0-9]", "", s)
-    digits = re.sub(r"[^0-9]", "", s)
-    if len(digits) == 10:
-        return f"+1{digits}"
-    if len(digits) == 11 and digits.startswith("1"):
-        return f"+{digits}"
-    return f"+{digits}" if digits else ""
+    return format_e164_sms(str(num or "")) or ""
 
 
 def _la_timestamp() -> str:
