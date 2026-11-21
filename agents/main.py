@@ -15,6 +15,8 @@ from n8n_catalog import get_n8n_workflows
 from orchestrator import DEFAULT_MODEL, DEFAULT_TASK_BUDGET, run_multi_agent_pipeline
 from state_store import (
     add_lesson,
+    cancel_post_close_drip,
+    clear_chat_history,
     delete_lesson,
     get_chat_history,
     get_office_floor_state,
@@ -22,7 +24,7 @@ from state_store import (
     get_request_flow_stats,
     get_system_summary,
     init_store,
-    cancel_post_close_drip,
+    list_chat_sessions,
 )
 import vector_memory
 from webhooks import (
@@ -212,10 +214,21 @@ def memory_query(req: MemoryQueryRequest) -> dict:
     return {"ok": True, "query": req.query, "matches": matches, "count": len(matches)}
 
 
+@app.get("/api/manager/chat/sessions")
+async def manager_chat_sessions(limit: int = 30):
+    return {"ok": True, "sessions": list_chat_sessions(limit=limit)}
+
+
 @app.get("/api/manager/chat/history")
-async def manager_chat_history(sessionId: Optional[str] = "manager_default", limit: int = 30):
-    msgs = get_chat_history(sessionId or "manager_default", limit=limit)
+async def manager_chat_history(sessionId: Optional[str] = "manager_primary", limit: int = 50):
+    msgs = get_chat_history(sessionId or "manager_primary", limit=limit)
     return {"ok": True, "sessionId": sessionId, "messages": msgs}
+
+
+@app.delete("/api/manager/chat/history")
+async def manager_delete_chat_history(sessionId: Optional[str] = "manager_primary"):
+    clear_chat_history(sessionId or "manager_primary")
+    return {"ok": True, "sessionId": sessionId}
 
 
 @app.post("/api/manager/chat")
@@ -227,7 +240,7 @@ async def manager_chat(req: ChatRequest):
     return StreamingResponse(
         run_multi_agent_pipeline(
             user_message=req.chatInput.strip(),
-            session_id=req.sessionId or "manager_default",
+            session_id=req.sessionId or "manager_primary",
             token_budget=budget,
         ),
         media_type="application/x-ndjson",

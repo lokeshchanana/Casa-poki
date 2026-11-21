@@ -801,11 +801,44 @@ def get_chat_history(session_id: str, limit: int = 10) -> List[Dict[str, Any]]:
 
 def clear_chat_history(session_id: str) -> None:
     init_store()
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("DELETE FROM chat_history WHERE session_id = ?", (session_id,))
-    conn.commit()
-    conn.close()
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM chat_history WHERE session_id = ?", (session_id,))
+        conn.commit()
+
+
+def list_chat_sessions(limit: int = 30) -> List[Dict[str, Any]]:
+    """Lists all server-persisted Manager chat sessions ordered by most recent activity."""
+    init_store()
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        cur = conn.cursor()
+        rows = cur.execute(
+            """
+            SELECT
+                session_id,
+                COUNT(*) as msg_count,
+                MAX(created_at) as last_active,
+                (
+                    SELECT content FROM chat_history c2
+                    WHERE c2.session_id = chat_history.session_id AND c2.role = 'user'
+                    ORDER BY c2.id DESC LIMIT 1
+                ) as last_user_prompt
+            FROM chat_history
+            GROUP BY session_id
+            ORDER BY MAX(id) DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [
+        {
+            "session_id": r[0],
+            "message_count": r[1],
+            "last_active": r[2],
+            "preview": (r[3] or "Conversation")[:60],
+        }
+        for r in rows
+    ]
 
 
 def categorize_request_flow(

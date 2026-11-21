@@ -222,25 +222,19 @@ function renderMarkdown(text) {
   return elements;
 }
 
+const WELCOME_MESSAGE = {
+  id: 'welcome',
+  role: 'assistant',
+  content:
+    "### Multi-Agent Manager Hub Online\n\nI am your **Central Manager Agent** powered directly by **Antigravity** with deep codebase context and full specialist team delegation.\n\nHere is how my team handles your instructions:\n- **Marcus Vance (Manager):** Analyzes your request, routes tasks, and coordinates specialists in real time.\n- **Silas Drake (Mailman):** Connects to `lokesh@lokeshchanana.com`, triages inbox messages, and drafts responses (draft-only policy with your verified signature).\n- **Miles Miller (Intake):** Manages Twenty CRM contacts, notes, and pipelines.\n- **Fiona Banks (Finance) & Victor Sterling (Tax Auditor):** Records invoices into Bigcapital, archives proofs, and runs CPA tax audits.\n- **Carter Hayes (CMA):** Real estate valuations and MLS comps.\n- **Maya Reyes (Marketing) & Social Studio:** Brand storylines, post-close client drips, and multi-channel social production.\n- **Ian Torres (IT) & Hannah Reed (Home Assistant):** Live monitoring, container health, and smart-home auto-healing.\n- **Audrey Chen (Auditor):** Real-time quality verification and Zero Stray Communications compliance.",
+  timestamp: '',
+  trace: [],
+  tokensUsed: 0,
+  tokenBudget: 64000
+};
+
 export default function ManagerChat({ onBackToCheckIn }) {
-  const [messages, setMessages] = useState(() => {
-    try {
-      const saved = localStorage.getItem('manager_chat_messages_v1');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return [
-      {
-        id: 'welcome',
-        role: 'assistant',
-        content:
-          "### Multi-Agent Manager Hub Online\n\nI am your **Central Manager Agent** powered directly by **Antigravity** with deep codebase context and full specialist team delegation.\n\nHere is how my team handles your instructions:\n- **Marcus Vance (Manager):** Analyzes your request, routes tasks, and coordinates specialists in real time.\n- **Silas Drake (Mailman):** Connects to `lokesh@lokeshchanana.com`, triages inbox messages, and drafts responses (draft-only policy with your verified signature).\n- **Miles Miller (Intake):** Manages Twenty CRM contacts, notes, and pipelines.\n- **Fiona Banks (Finance):** Records invoices and bills into Bigcapital.\n- **Carter Hayes (CMA):** Real estate valuations and MLS comps.\n- **Maya Reyes (Marketing):** Creative Director, brand storylines, and post-close client drips.\n- **Devon Brooks (Social Scout):** Washington real estate market updates & viral content formats.\n- **Nadia Kapoor (Avatar Studio):** Antigravity animated avatars & Google Photos curation.\n- **Leo Bennett (Content Producer):** Renders IG Posts/Carousels/Reels/Stories, Facebook, TikTok, and X posts.\n- **Priya Nair (Social Ops):** Past-post analytics, Pacific Time posting cadence & approval queue.\n- **Ian Torres (IT):** Live monitoring, container health, and infrastructure self-healing.\n- **Audrey Chen (Auditor):** Real-time quality verification and Zero Stray Communications compliance.",
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        trace: [],
-        tokensUsed: 0,
-        tokenBudget: 2000
-      }
-    ];
-  });
+  const [messages, setMessages] = useState([WELCOME_MESSAGE]);
 
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -250,17 +244,14 @@ export default function ManagerChat({ onBackToCheckIn }) {
   const [activeDrawer, setActiveDrawer] = useState(null); // 'workflows' | 'backlog' | 'learning' | null
   const [expandedTraces, setExpandedTraces] = useState({});
   const [dashboardData, setDashboardData] = useState(null);
+  const [sessions, setSessions] = useState([]);
   const [newLessonAgent, setNewLessonAgent] = useState('manager');
   const [newLessonRule, setNewLessonRule] = useState('');
   const [abortController, setAbortController] = useState(null);
 
-  const [sessionId] = useState(() => {
-    let sid = localStorage.getItem('manager_chat_session_id');
-    if (!sid) {
-      sid = 'mgr_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now();
-      localStorage.setItem('manager_chat_session_id', sid);
-    }
-    return sid;
+  const [sessionId, setSessionId] = useState(() => {
+    const saved = localStorage.getItem('manager_active_session_id');
+    return saved || 'manager_primary';
   });
 
   const messagesEndRef = useRef(null);
@@ -289,14 +280,28 @@ export default function ManagerChat({ onBackToCheckIn }) {
     }
   };
 
-  const fetchChatHistory = async () => {
+  const fetchSessions = async () => {
     try {
-      const res = await fetch(`${getApiBase()}/chat/history?sessionId=${encodeURIComponent(sessionId)}`);
+      const res = await fetch(`${getApiBase()}/chat/sessions?limit=30`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && Array.isArray(data.sessions)) {
+          setSessions(data.sessions);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load chat sessions:', e);
+    }
+  };
+
+  const fetchChatHistory = async (targetSid = sessionId) => {
+    try {
+      const res = await fetch(`${getApiBase()}/chat/history?sessionId=${encodeURIComponent(targetSid)}&limit=50`);
       if (res.ok) {
         const data = await res.json();
         if (data.ok && Array.isArray(data.messages) && data.messages.length > 0) {
           const loaded = data.messages.map((m, idx) => ({
-            id: `server_${m.id || idx}_${Date.now()}`,
+            id: `server_${targetSid}_${idx}`,
             role: m.role,
             content: m.content,
             timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
@@ -306,23 +311,21 @@ export default function ManagerChat({ onBackToCheckIn }) {
             isThinking: false
           }));
           setMessages(loaded);
+          return;
         }
       }
+      setMessages([{ ...WELCOME_MESSAGE, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
     } catch (e) {
       console.warn('Failed to load server chat history:', e);
     }
   };
 
   useEffect(() => {
+    localStorage.setItem('manager_active_session_id', sessionId);
     fetchDashboard();
-    fetchChatHistory();
+    fetchSessions();
+    fetchChatHistory(sessionId);
   }, [sessionId]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('manager_chat_messages_v1', JSON.stringify(messages));
-    } catch (e) {}
-  }, [messages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -338,22 +341,27 @@ export default function ManagerChat({ onBackToCheckIn }) {
     setExpandedTraces((prev) => ({ ...prev, [msgId]: !prev[msgId] }));
   };
 
-  const handleClearHistory = () => {
-    if (window.confirm('Clear current Manager chat conversation?')) {
-      const resetMessages = [
+  const handleNewChat = () => {
+    const nextSid = 'mgr_' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '_' + Math.random().toString(36).substring(2, 6);
+    setSessionId(nextSid);
+  };
+
+  const handleClearHistory = async () => {
+    if (window.confirm(`Clear server chat history for session "${sessionId}" across all devices?`)) {
+      try {
+        await fetch(`${getApiBase()}/chat/history?sessionId=${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+      } catch (e) {
+        console.warn('Failed to clear server chat history:', e);
+      }
+      setMessages([
         {
+          ...WELCOME_MESSAGE,
           id: 'welcome-' + Date.now(),
-          role: 'assistant',
-          content:
-            'Manager session refreshed. Ready to route tasks across IT Agent (n8n) and Auditor Agent.',
+          content: 'Manager session cleared. Ready to route tasks across your specialist agents.',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          trace: [],
-          tokensUsed: 0,
-          tokenBudget: 2000
         }
-      ];
-      setMessages(resetMessages);
-      localStorage.setItem('manager_chat_messages_v1', JSON.stringify(resetMessages));
+      ]);
+      fetchSessions();
     }
   };
 
@@ -441,7 +449,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
         body: JSON.stringify({
           chatInput: text,
           sessionId: sessionId,
-          tokenBudget: 2000
+          tokenBudget: 64000
         }),
         signal: controller.signal
       });
@@ -456,62 +464,72 @@ export default function ManagerChat({ onBackToCheckIn }) {
       let accumulatedText = '';
       let currentTraces = [];
 
+      const processStreamLine = (rawLine) => {
+        const trimmed = rawLine.trim();
+        if (!trimmed) return;
+        try {
+          const event = JSON.parse(trimmed);
+          if (event.type === 'agent_status') {
+            setActiveAgentPhase({
+              agent: event.agent,
+              phase: event.phase,
+              message: event.message
+            });
+          } else if (event.type === 'agent_trace' && event.trace) {
+            currentTraces = [...currentTraces, event.trace];
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId ? { ...m, trace: currentTraces } : m
+              )
+            );
+          } else if (event.type === 'item' && typeof event.content === 'string') {
+            accumulatedText += event.content;
+            // Auto-collapse workflow trace so the final answer is immediately visible
+            setExpandedTraces((prev) => ({ ...prev, [assistantMsgId]: false }));
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? { ...m, content: accumulatedText, isThinking: false }
+                  : m
+              )
+            );
+          } else if (event.type === 'complete' || event.type === 'agent_summary') {
+            setExpandedTraces((prev) => ({ ...prev, [assistantMsgId]: false }));
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? {
+                      ...m,
+                      trace: event.trace || event.trace_steps || currentTraces,
+                      tokensUsed: event.tokens_used || 0,
+                      tokenBudget: event.token_budget || 64000,
+                      specCreated: event.spec_created || null,
+                      isThinking: false
+                    }
+                  : m
+              )
+            );
+          }
+        } catch (e) {
+          console.warn('Non-JSON stream line:', trimmed);
+        }
+      };
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop();
-
+        buffer = lines.pop() || '';
         for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-
-          try {
-            const event = JSON.parse(trimmed);
-            if (event.type === 'agent_status') {
-              setActiveAgentPhase({
-                agent: event.agent,
-                phase: event.phase,
-                message: event.message
-              });
-            } else if (event.type === 'agent_trace' && event.trace) {
-              currentTraces = [...currentTraces, event.trace];
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantMsgId ? { ...m, trace: currentTraces } : m
-                )
-              );
-            } else if (event.type === 'item' && typeof event.content === 'string') {
-              accumulatedText += event.content;
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantMsgId
-                    ? { ...m, content: accumulatedText, isThinking: false }
-                    : m
-                )
-              );
-            } else if (event.type === 'complete' || event.type === 'agent_summary') {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantMsgId
-                    ? {
-                        ...m,
-                        trace: event.trace || event.trace_steps || currentTraces,
-                        tokensUsed: event.tokens_used || 0,
-                        tokenBudget: event.token_budget || 2000,
-                        specCreated: event.spec_created || null,
-                        isThinking: false
-                      }
-                    : m
-                )
-              );
-            }
-          } catch (e) {
-            console.warn('Non-JSON stream line:', trimmed);
-          }
+          processStreamLine(line);
         }
+      }
+
+      // Flush any trailing line left in buffer without trailing newline
+      if (buffer.trim()) {
+        processStreamLine(buffer);
       }
 
       if (!accumulatedText.trim()) {
@@ -530,6 +548,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
       }
 
       fetchDashboard();
+      fetchSessions();
     } catch (err) {
       if (err.name === 'AbortError') {
         setMessages((prev) =>
@@ -676,6 +695,34 @@ export default function ManagerChat({ onBackToCheckIn }) {
             title="Toggle suggested prompts"
           >
             <Sparkles className="w-4 h-4 text-amber-500" />
+          </button>
+
+          <select
+            value={sessionId}
+            onChange={(e) => setSessionId(e.target.value)}
+            className="px-2 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-charcoal border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200 max-w-[170px] truncate"
+            title="Switch synced server chat session"
+          >
+            <option value="manager_primary">Main Chat (Synced)</option>
+            {sessions
+              .filter((s) => s.session_id !== 'manager_primary')
+              .map((s) => (
+                <option key={s.session_id} value={s.session_id}>
+                  {s.preview || s.session_id} ({s.message_count})
+                </option>
+              ))}
+            {sessionId !== 'manager_primary' && !sessions.some((s) => s.session_id === sessionId) && (
+              <option value={sessionId}>New Chat ({sessionId.slice(-4)})</option>
+            )}
+          </select>
+
+          <button
+            type="button"
+            onClick={handleNewChat}
+            className="p-2 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded-lg transition-colors text-xs flex items-center gap-1 font-medium border border-neutral-300 dark:border-neutral-700"
+            title="Start a new synced chat session"
+          >
+            <Plus className="w-3.5 h-3.5" />
           </button>
 
           <button
