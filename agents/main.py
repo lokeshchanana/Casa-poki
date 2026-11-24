@@ -33,6 +33,7 @@ from webhooks import (
     handle_open_house_sign_in,
     handle_payment_intake,
     handle_website_contact,
+    sync_email_lifecycle_updates,
 )
 from tools import (
     _direct_enroll_buyer_post_close,
@@ -91,6 +92,27 @@ def on_startup() -> None:
     social_db.init_social_db()
     vector_memory.init_vector_memory_db()
     asyncio.create_task(_post_close_scheduler_loop())
+    asyncio.create_task(_email_lifecycle_scheduler_loop())
+
+
+async def _email_lifecycle_scheduler_loop() -> None:
+    """
+    Background worker that runs once per day (every 24 hours) for Silas Drake + Miles Miller
+    to scan lokesh@lokeshchanana.com (last 48h, read-only BODY.PEEK[]) and sync
+    real estate lifecycle updates to Twenty CRM.
+    """
+    await asyncio.sleep(45)
+    while True:
+        try:
+            await sync_email_lifecycle_updates(days_back=2, max_messages=60)
+        except Exception:
+            pass
+        await asyncio.sleep(86400)
+
+
+@app.post("/api/manager/email/lifecycle-sync")
+async def trigger_email_lifecycle_sync(days_back: int = 2) -> dict:
+    return await sync_email_lifecycle_updates(days_back=days_back)
 
 
 async def _post_close_scheduler_loop() -> None:

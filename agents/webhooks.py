@@ -598,10 +598,67 @@ async def handle_payment_intake(payload: Dict[str, Any]) -> Dict[str, Any]:
     return res
 
 
+NICKNAME_MAP = {
+    "jim": "james", "james": "jim", "jimmy": "james",
+    "bob": "robert", "rob": "robert", "bobby": "robert",
+    "bill": "william", "will": "william",
+    "mike": "michael", "chris": "christopher",
+    "dave": "david", "dan": "daniel", "danny": "daniel",
+    "joe": "joseph", "tom": "thomas", "nick": "nicholas",
+    "alex": "alexander", "kate": "katherine", "kathy": "katherine",
+    "lola": "lodmella", "lodmella": "lola",
+    "loki": "lokesh",
+}
+
+NON_CLIENT_EMAIL_DOMAINS = (
+    "authentisign.com", "nwmlsmatrixmail.com", "nwmls.com", "ctt.com",
+    "fnhw-warranty.com", "smartviewonline.net", "lokeshchanana.com",
+)
+OWNER_EMAILS = ("lokesh@lokeshchanana.com", "lokeshchanana@gmail.com")
+
+
+def _match_contact_by_name(candidate: str, all_contacts: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Match an active CRM contact by full name, nickname+last name, or unique first name."""
+    clean = re.sub(r"\s+", " ", (candidate or "").strip()).lower()
+    if not clean:
+        return None
+    # Remove middle initials for matching (e.g. "James N Beidatsch" -> first="james", last="beidatsch")
+    tokens = [t for t in clean.split(" ") if t]
+    first_tok = tokens[0]
+    last_tok = tokens[-1] if len(tokens) > 1 else ""
+    nick_tok = NICKNAME_MAP.get(first_tok, "")
+
+    # 1. Exact full name match
+    for c in all_contacts:
+        cname = re.sub(r"\s+", " ", (c.get("name") or "").strip()).lower()
+        if cname == clean:
+            return c
+
+    # 2. First/nickname + Last name match
+    if last_tok:
+        for c in all_contacts:
+            c_tokens = [t for t in (c.get("name") or "").strip().lower().split(" ") if t]
+            if len(c_tokens) >= 2 and c_tokens[-1] == last_tok:
+                if c_tokens[0] == first_tok or (nick_tok and c_tokens[0] == nick_tok):
+                    return c
+
+    # 3. Unique first-name or nickname match (only if unambiguous)
+    first_matches = []
+    for c in all_contacts:
+        c_first = ((c.get("name") or "").strip().lower().split(" ") or [""])[0]
+        if c_first == first_tok or (nick_tok and c_first == nick_tok):
+            first_matches.append(c)
+    if len(first_matches) == 1:
+        return first_matches[0]
+
+    return None
+
+
 async def handle_communication_intake(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Unified communication ingestion webhook for incoming SMS or parsed emails.
-    Routes real estate events through Miles Miller (CRM Specialist).
+    Routes real estate events through Miles Miller (CRM Specialist),
+    supporting co-clients, nicknames, deal upserts, and Title/Escrow milestones.
     """
     flow_id = f"flow_comm_{int(time.time()*1000)}"
     start_ts = time.time()
@@ -609,19 +666,29 @@ async def handle_communication_intake(payload: Dict[str, Any]) -> Dict[str, Any]
 
     sender = (payload.get("sender") or payload.get("from") or "").strip()
     recipient = (payload.get("to") or "").strip()
+    cc_header = (payload.get("cc") or "").strip()
     subject = (payload.get("subject") or "").strip()
     body = (payload.get("body") or payload.get("text") or payload.get("content") or "").strip()
     channel = (payload.get("channel") or "email").lower()
     msg_id = payload.get("message_id") or f"webhook_{flow_id}"
+    participants_hint: List[str] = payload.get("participants_hint") or []
 
     from state_store import is_communication_processed, record_processed_communication
     if is_communication_processed(msg_id):
         return {"ok": True, "status": "ALREADY_PROCESSED", "message_id": msg_id}
 
+    lower_sub = subject.lower()
+    lower_body = body.lower()
+    lower_sender = sender.lower()
+
+    # Ignore intermediate Authentisign "Signing updated:" notifications (handled on "Signing complete:")
+    if "authentisign.com" in lower_sender and lower_sub.startswith("signing updated:"):
+        return {"ok": True, "status": "IGNORED_INTERMEDIATE", "message_id": msg_id}
+
     steps.append({
         "step": "Communication Ingestion",
         "agent": "Silas Drake",
-        "action": f"Ingested {channel} communication from '{sender}' (Subject: {subject[:40]}...)",
+        "action": f"Ingested {channel} communication from '{sender}' (Subject: {subject[:50]})",
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "status": "ok",
     })
@@ -630,46 +697,74 @@ async def handle_communication_intake(payload: Dict[str, Any]) -> Dict[str, Any]
     event_type = "GENERAL_INQUIRY"
     extracted_data: Dict[str, Any] = {}
 
-    lower_sub = subject.lower()
-    lower_body = body.lower()
-
     # 1. NWMLS Search setup vs Portal activity
-    if "nwmls" in sender.lower() or "nwmlsmatrixmail.com" in sender.lower():
-        if "auto email" in lower_sub or "auto-email" in lower_sub or "initial search" in lower_sub:
+    if "nwmls" in lower_sender or "nwmlsmatrixmail.com" in lower_sender:
+        if "auto email" in lower_sub or "auto-email" in lower_sub or "initial search" in lower_sub or "welcome" in lower_sub:
             event_type = "NWMLS_SEARCH_CREATED"
-        elif "portal" in lower_sub or "viewed" in lower_sub or "favorite" in lower_sub:
+        elif "portal" in lower_sub or "viewed" in lower_sub or "favorite" in lower_sub or "activity" in lower_sub:
             event_type = "NWMLS_PORTAL_ACTIVE"
         else:
             event_type = "NWMLS_NOTIFICATION"
 
     # 2. Authentisign signing events
-    elif "authentisign.com" in sender.lower() or "authentisign" in lower_sub:
-        if "bba" in lower_sub or "buyer brokerage" in lower_sub or "services agreement" in lower_sub:
+    elif "authentisign.com" in lower_sender or "authentisign" in lower_sub:
+        if "bba" in lower_sub or "buyer brokerage" in lower_sub or "services agreement" in lower_sub or "form 41" in lower_body:
             event_type = "AUTHENTISIGN_BBA_SIGNED"
-        elif "listing" in lower_sub or "exclusive sale" in lower_sub or "form 1a" in lower_sub:
+        elif "listing" in lower_sub or "exclusive sale" in lower_sub or "form 1a" in lower_body:
             event_type = "AUTHENTISIGN_LISTING_SIGNED"
-        elif "psa" in lower_sub or "purchase and sale" in lower_sub or "disclosure" in lower_sub or "offer" in lower_sub:
+        elif "inspection" in lower_sub or "35r" in lower_sub:
+            event_type = "INSPECTION_CONFIRMED"
+        elif any(k in lower_sub for k in ("psa", "purchase and sale", "disclosure", "offer", "counter")) or re.search(r"\d{3,5}\s+", subject):
             event_type = "AUTHENTISIGN_OFFER_DISCLOSURE_SIGNED"
         else:
             event_type = "AUTHENTISIGN_COMPLETED"
 
-    # 3. Inspection confirmed
-    elif "inspection confirmed" in lower_sub or "home inspection" in lower_sub:
+    # 3. Title & Escrow (Chicago Title / @ctt.com / Recording / Earnest Money)
+    elif "ctt.com" in lower_sender or "chicago title" in lower_body or "escrow" in lower_sub or "title & escrow" in lower_sub:
+        if "recording complete" in lower_sub or "transaction closed" in lower_sub or "final settlement" in lower_sub:
+            event_type = "TRANSACTION_CLOSED"
+        elif "earnest money" in lower_sub:
+            event_type = "EARNEST_MONEY_RECEIVED"
+        elif "new title" in lower_sub or "added to an order" in lower_sub or "order updated" in lower_sub or "order #" in lower_sub:
+            event_type = "ESCROW_OPENED"
+
+    # 4. Inspection confirmed
+    elif "inspection confirmed" in lower_sub or "home inspection" in lower_sub or "inspection response" in lower_sub:
         event_type = "INSPECTION_CONFIRMED"
 
-    # 4. Closing / Title recording confirmation
-    elif "recording complete" in lower_sub or "closed" in lower_sub or "transaction closed" in lower_sub:
+    # 5. Closing / Title recording confirmation
+    elif "recording complete" in lower_sub or "transaction closed" in lower_sub:
         event_type = "TRANSACTION_CLOSED"
 
-    # Extraction of Property Address if present
-    addr_match = re.search(r"(\d{3,5}\s+[A-Za-z0-9\.\s]+(?:St|Ave|Avenue|Rd|Road|Way|Ct|Court|Dr|Drive|Blvd|Lane|Ln|E|W|N|S|NE|NW|SE|SW)[^,\n\r]*)", subject + " " + body, re.IGNORECASE)
-    if addr_match:
-        extracted_data["property_address"] = addr_match.group(1).strip()
+    # Extract Escrow Company / Order # if present
+    order_match = re.search(r"(CTTC\d+|Order\s*#?\s*[A-Z0-9-]+)", subject + " " + body, re.IGNORECASE)
+    if order_match and ("ctt.com" in lower_sender or "chicago title" in lower_body):
+        extracted_data["escrow_company"] = f"Chicago Title Company of Washington ({order_match.group(1).strip()})"
 
-    # Extraction of Client Names
-    names_match = re.search(r"(?:for|client:)\s+([A-Z][a-z]+(?:\s+and\s+[A-Z][a-z]+|\s+[A-Z][a-z]+))", subject, re.IGNORECASE)
+    # Extraction of Property Address if present
+    addr_match = re.search(
+        r"(\d{3,5}\s+[A-Za-z0-9\.\s]+?(?:St|Street|Ave|Avenue|Rd|Road|Way|Ct|Court|Dr|Drive|Blvd|Boulevard|Lane|Ln|Pl|Place)(?:\s+(?:E|W|N|S|NE|NW|SE|SW))?(?:,\s*[A-Za-z\s]+,\s*WA(?:\s+\d{5})?)?)",
+        subject + " " + body,
+        re.IGNORECASE,
+    )
+    if addr_match:
+        extracted_data["property_address"] = re.sub(r"\s+", " ", addr_match.group(1)).strip()
+
+    # Extraction of Client Names from Subject or Body (Buyer: ...)
+    names_match = re.search(
+        r"(?:for|Signing complete:|Signing updated:)\s*([A-Z][a-z]+(?:\s+and\s+[A-Z][a-z]+|\s+[A-Z][a-z]+))",
+        subject,
+        re.IGNORECASE,
+    )
     if names_match:
         extracted_data["client_names"] = names_match.group(1).strip()
+
+    buyer_line = re.search(r"Buyer:\s*([^\n\r]+?)(?:\s+Seller:|\s+External|\n|$)", body)
+    if buyer_line:
+        extracted_data["buyer_line"] = buyer_line.group(1).strip()
+
+    if participants_hint:
+        extracted_data["participants_hint"] = participants_hint
 
     steps.append({
         "step": "Triage & Handoff",
@@ -679,64 +774,109 @@ async def handle_communication_intake(payload: Dict[str, Any]) -> Dict[str, Any]
         "status": "ok",
     })
 
-    # Miles Miller executes the CRM state change
-    client_id = None
+    # Miles Miller executes the CRM state change across all matched co-clients
+    from tools import _direct_search_contacts, _direct_update_contact, _direct_manage_opportunities, _direct_manage_notes
+
+    all_res = await _direct_search_contacts({"query": "all", "limit": 500})
+    all_contacts = all_res.get("contacts", [])
+
+    matched_contacts: List[Dict[str, Any]] = []
+    seen_ids = set()
+
+    def _add_match(c: Optional[Dict[str, Any]]):
+        if c and c.get("id") and c["id"] not in seen_ids:
+            seen_ids.add(c["id"])
+            matched_contacts.append(c)
+
+    # 1. Explicit client_email or To/Cc client emails (excluding non-client service/agent domains)
+    candidate_emails: List[str] = []
+    if payload.get("client_email"):
+        candidate_emails.append(str(payload["client_email"]).strip().lower())
+    for hdr in (sender, recipient, cc_header):
+        for em in re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", hdr or ""):
+            em_l = em.lower()
+            if em_l not in OWNER_EMAILS and not any(d in em_l for d in NON_CLIENT_EMAIL_DOMAINS):
+                candidate_emails.append(em_l)
+
+    for em_l in dict.fromkeys(candidate_emails):
+        for c in all_contacts:
+            if (c.get("email") or "").strip().lower() == em_l:
+                _add_match(c)
+
+    # 2. Match via participants_hint (full names from Authentisign Signing updated) or buyer_line
+    name_candidates: List[str] = list(participants_hint)
+    if extracted_data.get("buyer_line"):
+        for part in re.split(r"[,&]|\band\b", extracted_data["buyer_line"]):
+            if part.strip():
+                name_candidates.append(part.strip())
+    if extracted_data.get("client_names"):
+        for part in re.split(r"\s+and\s+|\s*&\s*", extracted_data["client_names"], flags=re.IGNORECASE):
+            if part.strip():
+                name_candidates.append(part.strip())
+
+    for cand in name_candidates:
+        _add_match(_match_contact_by_name(cand, all_contacts))
+
+    # 3. Expand co-client via partnerName if only 1 partner matched
+    if len(matched_contacts) == 1:
+        p_name = (matched_contacts[0].get("partner_name") or "").strip()
+        if not p_name:
+            # Check raw person partnerName via CRM if needed
+            pass
+        else:
+            _add_match(_match_contact_by_name(p_name, all_contacts))
+
+    primary_contact = matched_contacts[0] if matched_contacts else None
+    client_id = primary_contact["id"] if primary_contact else None
     deal_id = None
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
 
-    from tools import _direct_search_contacts, _direct_update_contact, _direct_create_contact, _direct_manage_opportunities
+    # Cross-link partnerName if exactly 2 co-clients matched
+    if len(matched_contacts) == 2:
+        c0, c1 = matched_contacts[0], matched_contacts[1]
+        await _direct_update_contact({"contact_id": c0["id"], "partner_name": c1["name"]})
+        await _direct_update_contact({"contact_id": c1["id"], "partner_name": c0["name"]})
 
-    # Match contact by email or extracted names
-    client_email = payload.get("client_email")
-    if not client_email and "@" in sender and "nwmls" not in sender and "authentisign" not in sender:
-        client_email = sender
+    co_client_summary = ", ".join(
+        f"{c['name']} (ID: {c['id']}" + (f" | {c['email']}" if c.get("email") else "") + ")"
+        for c in matched_contacts[1:]
+    ) or extracted_data.get("client_names")
 
-    matched_contact = None
-    if client_email:
-        s_res = await _direct_search_contacts({"query": client_email})
-        if s_res.get("contacts"):
-            matched_contact = s_res["contacts"][0]
-            client_id = matched_contact["id"]
-
-    if not matched_contact and extracted_data.get("client_names"):
-        first_part = extracted_data["client_names"].split(" and ")[0]
-        s_res = await _direct_search_contacts({"query": first_part})
-        if s_res.get("contacts"):
-            matched_contact = s_res["contacts"][0]
-            client_id = matched_contact["id"]
-
-    # Execute specific lifecycle actions
+    # Execute specific lifecycle actions for ALL matched co-clients
     if event_type == "NWMLS_SEARCH_CREATED":
-        if client_id:
+        for c in matched_contacts:
             await _direct_update_contact({
-                "contact_id": client_id,
+                "contact_id": c["id"],
                 "lifecycle_stage": "Engaged",
                 "search_active": True,
             })
     elif event_type == "NWMLS_PORTAL_ACTIVE":
-        if client_id:
+        for c in matched_contacts:
             await _direct_update_contact({
-                "contact_id": client_id,
+                "contact_id": c["id"],
                 "lifecycle_stage": "Engaged",
                 "portal_active": True,
                 "last_portal_activity_at": datetime.utcnow().isoformat() + "Z",
             })
     elif event_type == "AUTHENTISIGN_BBA_SIGNED":
-        if client_id:
+        for c in matched_contacts:
             await _direct_update_contact({
-                "contact_id": client_id,
+                "contact_id": c["id"],
                 "role": "Buyer",
                 "lifecycle_stage": "Active Client",
                 "bba_signed": True,
-                "bba_signed_date": datetime.utcnow().strftime("%Y-%m-%d"),
+                "bba_signed_date": today_str,
+                "notes": f"Auto-synced from Authentisign: '{subject}' ({today_str}).",
             })
     elif event_type == "AUTHENTISIGN_LISTING_SIGNED":
-        if client_id:
+        for c in matched_contacts:
             await _direct_update_contact({
-                "contact_id": client_id,
+                "contact_id": c["id"],
                 "role": "Seller",
                 "lifecycle_stage": "Active Client",
                 "bba_signed": True,
-                "bba_signed_date": datetime.utcnow().strftime("%Y-%m-%d"),
+                "bba_signed_date": today_str,
+                "notes": f"Auto-synced Listing Agreement from Authentisign: '{subject}' ({today_str}).",
             })
         if extracted_data.get("property_address"):
             d_res = await _direct_manage_opportunities({
@@ -745,25 +885,50 @@ async def handle_communication_intake(payload: Dict[str, Any]) -> Dict[str, Any]
                 "deal_type": "Seller",
                 "deal_stage": "ACTIVE_LISTING",
                 "contact_id": client_id,
+                "co_clients": co_client_summary,
             })
             deal_id = d_res.get("id")
-    elif event_type in ("AUTHENTISIGN_OFFER_DISCLOSURE_SIGNED", "INSPECTION_CONFIRMED"):
+    elif event_type in ("AUTHENTISIGN_OFFER_DISCLOSURE_SIGNED", "INSPECTION_CONFIRMED", "ESCROW_OPENED"):
+        target_stage = "INSPECTION_PHASE" if event_type == "INSPECTION_CONFIRMED" else "UNDER_CONTRACT"
+        if "offer" in lower_sub and "counter" not in lower_sub and event_type == "AUTHENTISIGN_OFFER_DISCLOSURE_SIGNED":
+            target_stage = "OFFER_SUBMITTED"
         if extracted_data.get("property_address"):
-            d_res = await _direct_manage_opportunities({
+            opp_payload: Dict[str, Any] = {
                 "action": "create",
                 "property_address": extracted_data["property_address"],
                 "deal_type": "Buyer",
-                "deal_stage": "INSPECTION_PHASE" if event_type == "INSPECTION_CONFIRMED" else "UNDER_CONTRACT",
+                "deal_stage": target_stage,
                 "contact_id": client_id,
-                "co_clients": extracted_data.get("client_names"),
-            })
+                "co_clients": co_client_summary,
+            }
+            if event_type == "INSPECTION_CONFIRMED":
+                opp_payload["inspection_date"] = today_str
+            if extracted_data.get("escrow_company"):
+                opp_payload["escrow_company"] = extracted_data["escrow_company"]
+            d_res = await _direct_manage_opportunities(opp_payload)
             deal_id = d_res.get("id")
+        if target_stage in ("UNDER_CONTRACT", "INSPECTION_PHASE"):
+            for c in matched_contacts:
+                await _direct_update_contact({
+                    "contact_id": c["id"],
+                    "lifecycle_stage": "Pending",
+                    "primary_property_address": extracted_data.get("property_address"),
+                })
+    elif event_type == "EARNEST_MONEY_RECEIVED":
+        for c in matched_contacts:
+            await _direct_manage_notes({
+                "action": "create",
+                "contact_id": c["id"],
+                "title": f"Earnest Money Received ({today_str})",
+                "content": f"Escrow confirmed Earnest Money receipt: {subject}",
+            })
     elif event_type == "TRANSACTION_CLOSED":
         if extracted_data.get("property_address"):
             d_res = await _direct_manage_opportunities({
                 "action": "update",
                 "name": extracted_data["property_address"],
                 "deal_stage": "CLOSED_WON",
+                "close_date": datetime.utcnow().isoformat() + "Z",
             })
             deal_id = d_res.get("id")
 
@@ -773,16 +938,16 @@ async def handle_communication_intake(payload: Dict[str, Any]) -> Dict[str, Any]
         sender=sender,
         subject=subject,
         event_type=event_type,
-        client_name=extracted_data.get("client_names") or (matched_contact.get("name") if matched_contact else None),
+        client_name=", ".join(c["name"] for c in matched_contacts) or extracted_data.get("client_names"),
         client_id=client_id,
         deal_id=deal_id,
-        details=extracted_data,
+        details={**extracted_data, "matched_ids": [c["id"] for c in matched_contacts]},
     )
 
     steps.append({
         "step": "Lifecycle State Update",
         "agent": "Miles Miller",
-        "action": f"Executed Twenty CRM update (Event: {event_type}, Client: {client_id or 'Matched/Pending'}, Deal: {deal_id or 'None'})",
+        "action": f"Executed Twenty CRM update (Event: {event_type}, Matched: {len(matched_contacts)}, Deal: {deal_id or 'None'})",
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "status": "ok",
     })
@@ -795,8 +960,8 @@ async def handle_communication_intake(payload: Dict[str, Any]) -> Dict[str, Any]
         status="completed",
         agents_involved=["Silas Drake", "Miles Miller"],
         steps=steps,
-        payload_preview=payload,
-        result_summary=f"Processed {event_type} for '{sender}' in Twenty CRM",
+        payload_preview={"sender": sender, "subject": subject, "channel": channel},
+        result_summary=f"Processed {event_type} ({len(matched_contacts)} contacts) in Twenty CRM",
         duration_ms=duration_ms,
     )
 
@@ -804,8 +969,153 @@ async def handle_communication_intake(payload: Dict[str, Any]) -> Dict[str, Any]
         "ok": True,
         "event_type": event_type,
         "client_id": client_id,
+        "matched_count": len(matched_contacts),
         "deal_id": deal_id,
         "extracted": extracted_data,
         "duration_ms": duration_ms,
+    }
+
+
+async def sync_email_lifecycle_updates(days_back: int = 2, max_messages: int = 50) -> Dict[str, Any]:
+    """
+    Daily autonomous IMAP scanner for Silas Drake + Miles Miller.
+    Scans recent emails (read or unread) in lokesh@lokeshchanana.com using BODY.PEEK[]
+    in readonly mode, builds Authentisign participant hints, and routes unprocessed
+    real estate lifecycle emails into handle_communication_intake().
+    """
+    imap_user = os.environ.get("MAIL_IMAP_USER", "lokesh@lokeshchanana.com")
+    imap_pass = os.environ.get("MAIL_IMAP_PASSWORD", "").replace(" ", "")
+    if not imap_pass:
+        return {"ok": False, "error": "MAIL_IMAP_PASSWORD not configured."}
+
+    import email as py_email
+    import imaplib
+    from datetime import timedelta
+    from email.header import decode_header
+    from bs4 import BeautifulSoup
+    from state_store import is_communication_processed
+
+    def _decode_str(val: str) -> str:
+        parts = []
+        for b, enc in decode_header(val or ""):
+            if isinstance(b, bytes):
+                parts.append(b.decode(enc or "utf-8", errors="ignore"))
+            else:
+                parts.append(str(b))
+        return "".join(parts).strip()
+
+    def _fetch_recent_messages() -> List[Dict[str, Any]]:
+        since_str = (datetime.utcnow() - timedelta(days=days_back)).strftime("%d-%b-%Y")
+        mail = imaplib.IMAP4_SSL("imap.gmail.com", 993)
+        mail.login(imap_user, imap_pass)
+        mail.select("INBOX", readonly=True)
+        status, data = mail.search(None, f"SINCE {since_str}")
+        mail_ids = (data[0] or b"").split()[-max_messages:]
+        fetched: List[Dict[str, Any]] = []
+        for mid in mail_ids:
+            _, msg_data = mail.fetch(mid, "(BODY.PEEK[])")
+            for rp in msg_data:
+                if not isinstance(rp, tuple):
+                    continue
+                msg = py_email.message_from_bytes(rp[1])
+                subject = _decode_str(msg.get("Subject", ""))
+                sender = _decode_str(msg.get("From", ""))
+                to_hdr = _decode_str(msg.get("To", ""))
+                cc_hdr = _decode_str(msg.get("Cc", ""))
+                msg_id = (msg.get("Message-ID") or f"imap_{mid.decode()}").strip()
+
+                plain_text, html_text = "", ""
+                if msg.is_multipart():
+                    for part in msg.walk():
+                        ctype = part.get_content_type()
+                        if ctype == "text/plain" and not plain_text:
+                            pl = part.get_payload(decode=True)
+                            if pl:
+                                plain_text = pl.decode(errors="ignore")[:3000]
+                        elif ctype == "text/html" and not html_text:
+                            pl = part.get_payload(decode=True)
+                            if pl:
+                                html_text = pl.decode(errors="ignore")
+                else:
+                    pl = msg.get_payload(decode=True)
+                    if pl:
+                        if msg.get_content_type() == "text/html":
+                            html_text = pl.decode(errors="ignore")
+                        else:
+                            plain_text = pl.decode(errors="ignore")[:3000]
+
+                body = plain_text.strip()
+                if not body and html_text:
+                    body = BeautifulSoup(html_text, "html.parser").get_text(" ", strip=True)[:3000]
+
+                fetched.append({
+                    "message_id": msg_id,
+                    "sender": sender,
+                    "to": to_hdr,
+                    "cc": cc_hdr,
+                    "subject": subject,
+                    "body": body,
+                })
+        mail.logout()
+        return fetched
+
+    import asyncio
+    messages = await asyncio.to_thread(_fetch_recent_messages)
+
+    # Pass 1: Collect full participant names from Authentisign "Signing updated:" emails
+    session_participants: Dict[str, List[str]] = {}
+    for m in messages:
+        sub_l = m["subject"].lower()
+        if "authentisign" in m["sender"].lower() and sub_l.startswith("signing updated:"):
+            sess_match = re.search(r"signing updated:\s*(.+?),\s*action:", m["subject"], re.IGNORECASE)
+            part_match = re.search(r"participant:\s*([^\n\r]+)", m["subject"] + "\n" + m["body"], re.IGNORECASE)
+            if sess_match and part_match:
+                sess_key = re.sub(r"\s+", " ", sess_match.group(1).strip().lower())
+                p_name = re.sub(r"\s+", " ", part_match.group(1).strip())
+                session_participants.setdefault(sess_key, [])
+                if p_name and p_name not in session_participants[sess_key]:
+                    session_participants[sess_key].append(p_name)
+
+    # Pass 2: Route relevant, unprocessed real-estate lifecycle emails
+    relevant_senders = ("authentisign.com", "nwmlsmatrixmail.com", "ctt.com")
+    relevant_keywords = ("earnest money", "recording complete", "transaction closed", "new title & escrow", "inspection confirmed")
+
+    processed_results: List[Dict[str, Any]] = []
+    skipped = 0
+    for m in messages:
+        sub_l = m["subject"].lower()
+        snd_l = m["sender"].lower()
+        is_relevant = any(s in snd_l for s in relevant_senders) or any(k in sub_l for k in relevant_keywords)
+        if not is_relevant:
+            continue
+        if "authentisign.com" in snd_l and sub_l.startswith("signing updated:"):
+            continue
+        if is_communication_processed(m["message_id"]):
+            skipped += 1
+            continue
+
+        hints: List[str] = []
+        if sub_l.startswith("signing complete:"):
+            sess_key = re.sub(r"\s+", " ", m["subject"][len("signing complete:"):].strip().lower())
+            hints = session_participants.get(sess_key, [])
+
+        res = await handle_communication_intake({
+            **m,
+            "channel": "email",
+            "participants_hint": hints,
+        })
+        processed_results.append({
+            "subject": m["subject"],
+            "event_type": res.get("event_type"),
+            "matched_count": res.get("matched_count", 0),
+            "deal_id": res.get("deal_id"),
+        })
+
+    return {
+        "ok": True,
+        "scanned": len(messages),
+        "processed": len(processed_results),
+        "already_processed_skipped": skipped,
+        "results": processed_results,
     }
 

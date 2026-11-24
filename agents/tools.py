@@ -957,6 +957,8 @@ async def _direct_search_contacts(args: Dict[str, Any]) -> Dict[str, Any]:
     
     mapped_contacts: List[Dict[str, Any]] = []
     for p in people:
+        if p.get("deletedAt"):
+            continue
         first_name = (p.get("name") or {}).get("firstName") or ""
         last_name = (p.get("name") or {}).get("lastName") or ""
         full_name = f"{first_name} {last_name}".strip() or "Contact"
@@ -976,6 +978,7 @@ async def _direct_search_contacts(args: Dict[str, Any]) -> Dict[str, Any]:
             "market": p.get("market") or "",
             "job_title": p.get("jobTitle") or "",
             "lifecycle_stage": p.get("lifecycleStage") or "",
+            "partner_name": p.get("partnerName") or "",
             "address": p.get("primaryPropertyAddress") or "",
             "created_at": p.get("createdAt") or "",
             "created_date": (p.get("createdAt") or "")[:10],
@@ -1447,6 +1450,21 @@ async def _direct_manage_tasks(args: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _normalize_street_key(addr: str) -> str:
+    """Normalize street address for deduplicating deals across formatting variations."""
+    if not addr:
+        return ""
+    street = addr.split(",")[0].strip().lower()
+    street = re.sub(r"[^a-z0-9\s]", " ", street)
+    replacements = {
+        "avenue": "ave", "street": "st", "road": "rd", "court": "ct",
+        "drive": "dr", "boulevard": "blvd", "lane": "ln", "place": "pl",
+        "east": "e", "west": "w", "north": "n", "south": "s",
+    }
+    tokens = [replacements.get(t, t) for t in street.split()]
+    return " ".join(tokens)
+
+
 async def _direct_manage_opportunities(args: Dict[str, Any]) -> Dict[str, Any]:
     action = args.get("action", "list").lower()
 
@@ -1455,6 +1473,25 @@ async def _direct_manage_opportunities(args: Dict[str, Any]) -> Dict[str, Any]:
         property_address = args.get("property_address") or name
         if not property_address:
             return {"ok": False, "tool": "manage_opportunities", "error": "Property address or name is required."}
+
+        # Upsert check: reuse existing active deal for the same normalized street address
+        norm_target = _normalize_street_key(property_address)
+        if norm_target:
+            try:
+                existing_res = await crm_get("/rest/opportunities?limit=100&order=createdAt:desc")
+                for opp in existing_res.get("data", {}).get("opportunities", []):
+                    if opp.get("deletedAt"):
+                        continue
+                    if (opp.get("dealStage") or "").upper() in ("TERMINATED", "CLOSED_WON"):
+                        continue
+                    existing_addr = opp.get("propertyAddress") or opp.get("name") or ""
+                    if _normalize_street_key(existing_addr) == norm_target:
+                        update_args = dict(args)
+                        update_args["action"] = "update"
+                        update_args["opportunity_id"] = opp.get("id")
+                        return await _direct_manage_opportunities(update_args)
+            except Exception as ue:
+                logger.warning(f"Deal upsert check failed, proceeding with create: {ue}")
 
         contact_id = args.get("contact_id")
         if not contact_id and args.get("target_name"):
@@ -1536,10 +1573,15 @@ async def _direct_manage_opportunities(args: Dict[str, Any]) -> Dict[str, Any]:
     elif action == "update":
         opp_id = args.get("opportunity_id") or args.get("id")
         if not opp_id and args.get("name"):
-            # Search by name
-            raw_res = await crm_get("/rest/opportunities?limit=50")
+            # Search by name or normalized street address
+            raw_res = await crm_get("/rest/opportunities?limit=100")
+            norm_q = _normalize_street_key(args["name"])
             for o in raw_res.get("data", {}).get("opportunities", []):
-                if args["name"].lower() in (o.get("name") or "").lower():
+                if o.get("deletedAt"):
+                    continue
+                o_name = o.get("name") or ""
+                o_addr = o.get("propertyAddress") or o_name
+                if args["name"].lower() in o_name.lower() or (norm_q and norm_q == _normalize_street_key(o_addr)):
                     opp_id = o.get("id")
                     break
 
@@ -1595,17 +1637,26 @@ async def _direct_manage_opportunities(args: Dict[str, Any]) -> Dict[str, Any]:
                 dtype = opp_data.get("dealType") or "Buyer"
                 addr = opp_data.get("propertyAddress") or opp_data.get("name")
 
-                if poc_id:
-                    if deal_stage == "TERMINATED":
+                co_str = opp_data.get("coClients") or ""
+                co_ids = re.findall(r"ID:\s*([0-9a-fA-F-]{36})", co_str)
+                all_client_ids = [cid for cid in dict.fromkeys([poc_id] + co_ids) if cid]
+
+                for cid in all_client_ids:
+                    if deal_stage in ("UNDER_CONTRACT", "INSPECTION_PHASE"):
+                        await crm_patch(f"/rest/people/{cid}", {
+                            "lifecycleStage": "Pending",
+                            "primaryPropertyAddress": addr,
+                        })
+                    elif deal_stage == "TERMINATED":
                         # Revert contact back to Active Client
-                        await crm_patch(f"/rest/people/{poc_id}", {"lifecycleStage": "Active Client"})
-                        logger.info(f"Fall-through protocol: Reverted contact '{poc_id}' to 'Active Client'.")
+                        await crm_patch(f"/rest/people/{cid}", {"lifecycleStage": "Active Client"})
+                        logger.info(f"Fall-through protocol: Reverted contact '{cid}' to 'Active Client'.")
                     elif deal_stage == "CLOSED_WON":
                         # Mark contact as Past Client with Buyer/Seller segmentation
                         past_type = "Buyer" if "buyer" in dtype.lower() else "Seller"
                         is_maint_tips = (past_type == "Buyer")
                         await crm_patch(
-                            f"/rest/people/{poc_id}",
+                            f"/rest/people/{cid}",
                             {
                                 "lifecycleStage": "Past Client",
                                 "pastClientType": past_type,
@@ -1614,14 +1665,14 @@ async def _direct_manage_opportunities(args: Dict[str, Any]) -> Dict[str, Any]:
                             },
                         )
                         logger.info(
-                            f"Closing finalized: Contact '{poc_id}' marked as Past Client ({past_type}, maintenance_tips={is_maint_tips})."
+                            f"Closing finalized: Contact '{cid}' marked as Past Client ({past_type}, maintenance_tips={is_maint_tips})."
                         )
                         # Auto-Trigger Buyer Post-Close Smart Plan via Marketing Agent
                         if past_type == "Buyer":
                             c_date = opp_data.get("closeDate") or datetime.utcnow().strftime("%Y-%m-%d")
                             is_new_c = bool("new construction" in (opp_data.get("name") or "").lower())
                             enroll_res = await _direct_enroll_buyer_post_close({
-                                "contact_id": poc_id,
+                                "contact_id": cid,
                                 "close_date": c_date,
                                 "property_address": addr,
                                 "deal_id": opp_id,

@@ -85,15 +85,16 @@ LIFECYCLE & DEAL RULES:
    - When Form 41 BBA is signed: Set role='Buyer', lifecycle_stage='Active Client', bba_signed=true.
    - When Form 1A Listing is signed: Set role='Seller', lifecycle_stage='Active Client', create Seller deal.
 3. Offers & Deals:
+   - Deal Upsert: Always reuse/update an existing active Opportunity for the same normalized street address (e.g. "8610 63rd Ave E" == "8610 63rd Avenue E") rather than creating duplicate deals.
    - When an offer is submitted: Create or update deal (deal_stage='OFFER_SUBMITTED'). Contact stays Active Client.
-   - When mutually accepted (under contract): Set deal_stage='UNDER_CONTRACT', contact lifecycle_stage='Pending'.
-   - Co-Clients: If couples or partners are buying/selling (e.g. Jim & Lola), link both on the deal and partnerName.
-   - Fall-Through / Terminated: If an offer is rejected or terminated (Form 35), set deal_stage='TERMINATED', revert contact to 'Active Client'.
+   - When mutually accepted or escrow opens (Title/Escrow order opened): Set deal_stage='UNDER_CONTRACT', contact lifecycle_stage='Pending'.
+   - Co-Clients & Nicknames: Resolve nicknames (e.g. Jim <-> James, Lola <-> Lodmella) and Authentisign participant full names. When couples/co-clients buy or sell together (e.g. Jim & Lola, Tharah & Jhen), update BOTH contacts, cross-link partnerName on each, and link both on the Opportunity.
+   - Fall-Through / Terminated: If an offer is rejected or terminated (Form 35), set deal_stage='TERMINATED', revert all linked co-clients to 'Active Client'.
 4. Closing & Past Clients:
-   - When transaction closes (Title/Escrow recording): Set deal_stage='CLOSED_WON', contact lifecycle_stage='Past Client'.
+   - When transaction closes (Title/Escrow recording): Set deal_stage='CLOSED_WON', all linked co-clients lifecycle_stage='Past Client'.
    - If Buyer: Set past_client_type='Buyer', home_maintenance_tips=true.
    - If Seller: Set past_client_type='Seller', home_maintenance_tips=false (no maintenance tips for sold homes).
-5. Non-Client Emails: Listing agents, lenders, inspectors, and escrow officers must NEVER be converted to Buyer/Seller clients.""",
+5. Non-Client Emails: Listing agents, lenders, inspectors, home warranty reps, and escrow officers (@ctt.com) must NEVER be converted to Buyer/Seller clients.""",
     },
     "finance": {
         "name": "Fiona Banks",
@@ -213,9 +214,9 @@ You do not make independent business decisions; your sole mission is to reliably
 - Real Estate Lifecycle & Deal Communications:
   * NWMLS Auto-Email setup / search notifications (from nwmls@nwmlsmatrixmail.com) -> Handed off to Miles Miller to activate search and set stage to Engaged.
   * NWMLS Portal activity / client views -> Handed off to Miles Miller to update last activity and portal status without downgrading higher stages.
-  * Authentisign signed agreements (secure@authentisign.com) -> Identify BBA (Form 41), Listing (Form 1A), or Purchase Agreement (Form 21) and hand off to Miles Miller.
-  * Offer submissions & disclosures (e.g. for Jim and Lola - 8610 63rd Ave E) -> Extract property address, clients, dates, and hand off to Miles Miller.
-  * Inspection confirmations & Escrow/Title closing confirmations -> Hand off to Miles Miller to update deal milestones and execute closing.
+  * Authentisign signed agreements (secure@authentisign.com) -> Identify BBA (Form 41), Listing (Form 1A), Purchase Agreement (Form 21), Counter, or Inspection Response (35R), extract all Participant full names from Signing updated/complete emails, and hand off to Miles Miller.
+  * Offer submissions & disclosures (e.g. for Jim and Lola - 8610 63rd Ave E) -> Extract property address, all co-clients, dates, and hand off to Miles Miller.
+  * Title & Escrow updates (e.g. Chicago Title @ctt.com order opened, earnest money, recording complete) -> Extract order number, property address, buyer/seller names, and hand off to Miles Miller without adding escrow officers as clients.
 - Finance emails (bills, invoices, payment receipts, taxes) -> Handed off to Fiona Banks (Finance).
 - CRM related emails (buyer/seller inquiries, client leads, contact info updates) -> Handed off to Miles Miller (Intake).
 - CMA & property valuation inquiries -> Handed off to Carter Hayes (CMA).
