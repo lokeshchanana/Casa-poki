@@ -877,330 +877,433 @@ async def run_multi_agent_pipeline(
         return
 
     # -------------------------------------------------------------------------
-    # Main Agent Reasoner: Vector Memory Retrieval + Native Multi-Agent Triage
+    # Main Agent Reasoner: Persist User Turn Immediately + Multi-Agent Triage
     # -------------------------------------------------------------------------
-    # 1. Retrieve relevant memories from the Vector Database
-    recalled_memories = vector_memory.query_memories(query=user_message, top_k=3)
-    memory_context_block = ""
-    if recalled_memories:
-        memory_lines = [
-            f"- [{m['agent_id'].upper()}] {m['content']} (relevance: {int(m['similarity']*100)}%)"
-            for m in recalled_memories
-        ]
-        memory_context_block = "\nRelevant Vector Memories from Brain:\n" + "\n".join(memory_lines) + "\n"
-
-    # Load historical context and dynamically prune ONLY when context has shifted
+    # Persist user message immediately so even if connection/LLM fails mid-flight,
+    # a subsequent "Try again" sees the exact failed query instead of an older turn.
     raw_history = get_chat_history(session_id, limit=6)
-    history = prepare_pruned_history(raw_history, user_message)
-    lessons = [l["rule"] for l in get_lessons()[:8]]
-    lessons_block = ("\nActive Lessons:\n" + "\n".join(f"- {r}" for r in lessons)) if lessons else ""
+    add_chat_message(session_id, "user", user_message)
 
-    messages = [
-        {"role": "system", "content": MANAGER_SYSTEM_PROMPT + lessons_block + memory_context_block},
-    ]
-    for h in history:
-        messages.append({"role": h["role"], "content": h["content"]})
-    messages.append({"role": "user", "content": user_message})
+    try:
+        # 1. Retrieve relevant memories from the Vector Database
+        recalled_memories = vector_memory.query_memories(query=user_message, top_k=3)
+        memory_context_block = ""
+        if recalled_memories:
+            memory_lines = [
+                f"- [{m['agent_id'].upper()}] {m['content']} (relevance: {int(m['similarity']*100)}%)"
+                for m in recalled_memories
+            ]
+            memory_context_block = "\nRelevant Vector Memories from Brain:\n" + "\n".join(memory_lines) + "\n"
 
-    # Call Manager Agent with tool declarations
-    llm_resp = await call_llm_chat(
-        task_id=task_id,
-        agent_name="manager",
-        messages=messages,
-        tools=TOOL_SCHEMAS,
-        max_tokens=1500,
-        temperature=0.1,
-    )
-    tokens_used += llm_resp["metrics"]["total_tokens"]
-    tool_calls = llm_resp["tool_calls"]
-    direct_content = llm_resp["content"]
+        # Load historical context and dynamically prune ONLY when context has shifted
+        history = prepare_pruned_history(raw_history, user_message)
+        lessons = [l["rule"] for l in get_lessons()[:8]]
+        lessons_block = ("\nActive Lessons:\n" + "\n".join(f"- {r}" for r in lessons)) if lessons else ""
 
-    # -------------------------------------------------------------------------
-    # Path A: Multi-Step Tool & Delegation Loop (up to 4 tool turns)
-    # -------------------------------------------------------------------------
-    if tool_calls:
-        MAX_TOOL_TURNS = 4
-        executed_tools: List[str] = []
-        last_formatted = ""
-        last_tool_ok = True
-        last_tool_err = ""
-        delegated_agent_names: List[str] = []
-        final_synthesized = ""
-        step_num = 0
+        messages = [
+            {"role": "system", "content": MANAGER_SYSTEM_PROMPT + lessons_block + memory_context_block},
+        ]
+        for h in history:
+            messages.append({"role": h["role"], "content": h["content"]})
+        messages.append({"role": "user", "content": user_message})
 
-        for turn in range(MAX_TOOL_TURNS):
-            if not tool_calls:
-                break
+        # Call Manager Agent with tool declarations
+        llm_resp = await call_llm_chat(
+            task_id=task_id,
+            agent_name="manager",
+            messages=messages,
+            tools=TOOL_SCHEMAS,
+            max_tokens=1500,
+            temperature=0.1,
+        )
+        tokens_used += llm_resp["metrics"]["total_tokens"]
+        tool_calls = llm_resp["tool_calls"]
+        direct_content = llm_resp["content"]
 
-            call = tool_calls[0]
-            func = call.get("function") or {}
-            tool_name = func.get("name")
-            args = func.get("arguments") or {}
-            if isinstance(args, str):
-                try:
-                    args = json.loads(args)
-                except Exception:
-                    args = {}
+        # -------------------------------------------------------------------------
+        # Path A: Multi-Step Tool & Delegation Loop (up to 4 tool turns)
+        # -------------------------------------------------------------------------
+        if tool_calls:
+            MAX_TOOL_TURNS = 4
+            executed_tools: List[str] = []
+            last_formatted = ""
+            last_tool_ok = True
+            last_tool_err = ""
+            delegated_agent_names: List[str] = []
+            final_synthesized = ""
+            step_num = 0
 
-            invoked_tool_name = tool_name
-            invoked_tool_args = args
-            executed_tools.append(str(tool_name))
+            for turn in range(MAX_TOOL_TURNS):
+                if not tool_calls:
+                    break
 
-            if tool_name == "search_contacts" and "query" in args:
-                args["query"] = re.sub(r"^(is there a |does a |find |search |use |user )", "", str(args["query"]), flags=re.I).strip()
+                call = tool_calls[0]
+                func = call.get("function") or {}
+                tool_name = func.get("name")
+                args = func.get("arguments") or {}
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        args = {}
 
-            yield emit(
-                "agent_status",
-                {
-                    "agent": "it_agent",
-                    "phase": "executing_tool",
-                    "message": f"Executing tool `{tool_name}` (step {turn + 1}/{MAX_TOOL_TURNS})...",
-                },
-            )
+                invoked_tool_name = tool_name
+                invoked_tool_args = args
+                executed_tools.append(str(tool_name))
 
-            step_num += 1
-            plan_trace = {
-                "step": step_num,
-                "agent": "Manager Agent",
-                "role": "Task Triage & Delegation",
-                "decision": {
-                    "intent": "EXECUTE_TOOL",
-                    "tool": tool_name,
-                    "arguments": args,
-                    "turn": turn + 1,
-                },
-                "metrics": llm_resp["metrics"],
-                "tokens_remaining": max(0, token_budget - tokens_used),
-            }
-            trace_steps.append(plan_trace)
-            yield emit("agent_trace", {"trace": plan_trace})
-
-            specialist_info = SPECIALIST_PERSONAS["manager"]
-            specialist_name = specialist_info["name"]
-
-            if tool_name == "delegate_to_agent":
-                target_agent = args.get("target_agent", "manager").lower()
-                task_desc = args.get("task_description", "")
-                context_data = args.get("context_data", "")
-
-                specialist_info = SPECIALIST_PERSONAS.get(target_agent, SPECIALIST_PERSONAS["manager"])
-                specialist_name = specialist_info["name"]
-                if specialist_name not in delegated_agent_names:
-                    delegated_agent_names.append(specialist_name)
+                if tool_name == "search_contacts" and "query" in args:
+                    args["query"] = re.sub(r"^(is there a |does a |find |search |use |user )", "", str(args["query"]), flags=re.I).strip()
 
                 yield emit(
                     "agent_status",
                     {
-                        "agent": target_agent,
-                        "phase": "specialist_working",
-                        "message": f"{specialist_name} ({specialist_info['role']}) is executing delegated task...",
+                        "agent": "it_agent",
+                        "phase": "executing_tool",
+                        "message": f"Executing tool `{tool_name}` (step {turn + 1}/{MAX_TOOL_TURNS})...",
                     },
                 )
 
-                spec_memories = vector_memory.query_memories(query=task_desc, agent_id=target_agent, top_k=2)
-                spec_mem_str = "\n".join(f"- {m['content']}" for m in spec_memories) if spec_memories else "None"
-
-                specialist_messages = [
-                    {
-                        "role": "system",
-                        "content": f"{specialist_info['system_prompt']}\nRelevant Domain Knowledge:\n{spec_mem_str}\nProvide a direct, high-value, professional response.",
+                step_num += 1
+                plan_trace = {
+                    "step": step_num,
+                    "agent": "Manager Agent",
+                    "role": "Task Triage & Delegation",
+                    "decision": {
+                        "intent": "EXECUTE_TOOL",
+                        "tool": tool_name,
+                        "arguments": args,
+                        "turn": turn + 1,
                     },
-                    {
-                        "role": "user",
-                        "content": f"Task: {task_desc}\nContext: {context_data}",
-                    },
-                ]
+                    "metrics": llm_resp["metrics"],
+                    "tokens_remaining": max(0, token_budget - tokens_used),
+                }
+                trace_steps.append(plan_trace)
+                yield emit("agent_trace", {"trace": plan_trace})
 
-                crm_tools = [
-                    t for t in TOOL_SCHEMAS
-                    if t["function"]["name"] in (
-                        "search_contacts",
-                        "create_contact",
-                        "update_contact",
-                        "delete_contact",
-                        "manage_notes",
-                        "manage_tasks",
-                        "manage_opportunities",
-                        "crm_entity_operation",
+                specialist_info = SPECIALIST_PERSONAS["manager"]
+                specialist_name = specialist_info["name"]
+
+                if tool_name == "delegate_to_agent":
+                    target_agent = args.get("target_agent", "manager").lower()
+                    task_desc = args.get("task_description", "")
+                    context_data = args.get("context_data", "")
+
+                    specialist_info = SPECIALIST_PERSONAS.get(target_agent, SPECIALIST_PERSONAS["manager"])
+                    specialist_name = specialist_info["name"]
+                    if specialist_name not in delegated_agent_names:
+                        delegated_agent_names.append(specialist_name)
+
+                    yield emit(
+                        "agent_status",
+                        {
+                            "agent": target_agent,
+                            "phase": "specialist_working",
+                            "message": f"{specialist_name} ({specialist_info['role']}) is executing delegated task...",
+                        },
                     )
-                ]
 
-                spec_tools = (
-                    [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("finance_")]
-                    if target_agent in ("finance", "tax_auditor")
-                    else (
-                        [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("ha_")]
-                        if target_agent == "homeassistant"
+                    spec_memories = vector_memory.query_memories(query=task_desc, agent_id=target_agent, top_k=2)
+                    spec_mem_str = "\n".join(f"- {m['content']}" for m in spec_memories) if spec_memories else "None"
+
+                    specialist_messages = [
+                        {
+                            "role": "system",
+                            "content": f"{specialist_info['system_prompt']}\nRelevant Domain Knowledge:\n{spec_mem_str}\nProvide a direct, high-value, professional response.",
+                        },
+                        {
+                            "role": "user",
+                            "content": f"Task: {task_desc}\nContext: {context_data}",
+                        },
+                    ]
+
+                    crm_tools = [
+                        t for t in TOOL_SCHEMAS
+                        if t["function"]["name"] in (
+                            "search_contacts",
+                            "create_contact",
+                            "update_contact",
+                            "delete_contact",
+                            "manage_notes",
+                            "manage_tasks",
+                            "manage_opportunities",
+                            "crm_entity_operation",
+                        )
+                    ]
+
+                    spec_tools = (
+                        [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("finance_")]
+                        if target_agent in ("finance", "tax_auditor")
                         else (
-                            [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("mailman_")]
-                            if target_agent == "mailman"
+                            [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("ha_")]
+                            if target_agent == "homeassistant"
                             else (
-                                crm_tools
-                                if target_agent in ("intake", "manager")
-                                else None
+                                [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("mailman_")]
+                                if target_agent == "mailman"
+                                else (
+                                    crm_tools
+                                    if target_agent in ("intake", "manager")
+                                    else None
+                                )
                             )
                         )
                     )
-                )
 
-                spec_resp = await call_llm_chat(
-                    task_id=task_id,
-                    agent_name=target_agent,
-                    messages=specialist_messages,
-                    tools=spec_tools,
-                    max_tokens=800,
-                    temperature=0.2,
-                )
-                tokens_used += spec_resp["metrics"]["total_tokens"]
-                specialist_output = spec_resp["content"]
-
-                if spec_resp.get("tool_calls"):
-                    fn_formatted = ""
-                    for t_call in spec_resp["tool_calls"]:
-                        fn_data = t_call.get("function", {})
-                        fn_name = fn_data.get("name")
-                        fn_args = fn_data.get("arguments", {})
-                        fn_res = await execute_tool(fn_name, fn_args)
-                        fn_formatted = format_tool_result(fn_name, fn_res, fn_args)
-                        specialist_messages.append({"role": "assistant", "content": "", "tool_calls": [t_call]})
-                        specialist_messages.append({"role": "tool", "content": json.dumps(fn_res)})
-
-                    spec_turn2 = await call_llm_chat(
+                    spec_resp = await call_llm_chat(
                         task_id=task_id,
                         agent_name=target_agent,
                         messages=specialist_messages,
-                        tools=None,
+                        tools=spec_tools,
                         max_tokens=800,
                         temperature=0.2,
                     )
-                    tokens_used += spec_turn2["metrics"]["total_tokens"]
-                    specialist_output = spec_turn2["content"]
-                    if fn_formatted and fn_formatted not in specialist_output:
-                        specialist_output = f"{fn_formatted}\n\n{specialist_output}"
+                    tokens_used += spec_resp["metrics"]["total_tokens"]
+                    specialist_output = spec_resp["content"]
 
-                tool_result = {
-                    "ok": True,
-                    "tool": "delegate_to_agent",
-                    "target_agent": target_agent,
-                    "specialist_name": specialist_name,
-                    "response": specialist_output,
-                    "duration_ms": spec_resp["metrics"]["duration_ms"],
+                    if spec_resp.get("tool_calls"):
+                        fn_formatted = ""
+                        for t_call in spec_resp["tool_calls"]:
+                            fn_data = t_call.get("function", {})
+                            fn_name = fn_data.get("name")
+                            fn_args = fn_data.get("arguments", {})
+                            fn_res = await execute_tool(fn_name, fn_args)
+                            fn_formatted = format_tool_result(fn_name, fn_res, fn_args)
+                            specialist_messages.append({"role": "assistant", "content": "", "tool_calls": [t_call]})
+                            specialist_messages.append({"role": "tool", "content": json.dumps(fn_res)})
+
+                        spec_turn2 = await call_llm_chat(
+                            task_id=task_id,
+                            agent_name=target_agent,
+                            messages=specialist_messages,
+                            tools=None,
+                            max_tokens=800,
+                            temperature=0.2,
+                        )
+                        tokens_used += spec_turn2["metrics"]["total_tokens"]
+                        specialist_output = spec_turn2["content"]
+                        if fn_formatted and fn_formatted not in specialist_output:
+                            specialist_output = f"{fn_formatted}\n\n{specialist_output}"
+
+                    tool_result = {
+                        "ok": True,
+                        "tool": "delegate_to_agent",
+                        "target_agent": target_agent,
+                        "specialist_name": specialist_name,
+                        "response": specialist_output,
+                        "duration_ms": spec_resp["metrics"]["duration_ms"],
+                    }
+                    last_formatted = (
+                        f"### Delegated Response from {specialist_name} ({specialist_info['role']})\n\n"
+                        f"{specialist_output}"
+                    )
+
+                    vector_memory.store_memory(
+                        agent_id=target_agent,
+                        content=f"Resolution for task '{task_desc[:120]}': {specialist_output[:300]}",
+                        category="past_resolution",
+                    )
+                else:
+                    tool_result = await execute_tool(tool_name, args)
+                    last_formatted = format_tool_result(tool_name, tool_result, args)
+
+                if not (tool_result.get("ok", True) and "error" not in tool_result):
+                    last_tool_ok = False
+                    last_tool_err = str(tool_result.get("error") or "Unknown error")
+
+                step_num += 1
+                exec_trace = {
+                    "step": step_num,
+                    "agent": specialist_name if tool_name == "delegate_to_agent" else "IT Agent",
+                    "role": f"Specialist ({specialist_info['role']})" if tool_name == "delegate_to_agent" else "Tool Execution Gateway",
+                    "result": {
+                        "tool": tool_name,
+                        "status": "SUCCESS" if tool_result.get("ok", True) else "FAILED",
+                        "raw_result": tool_result,
+                    },
+                    "metrics": {"duration_ms": tool_result.get("duration_ms", 50), "total_tokens": 0},
+                    "tokens_remaining": max(0, token_budget - tokens_used),
                 }
-                last_formatted = (
-                    f"### Delegated Response from {specialist_name} ({specialist_info['role']})\n\n"
-                    f"{specialist_output}"
-                )
+                trace_steps.append(exec_trace)
+                yield emit("agent_trace", {"trace": exec_trace})
 
-                vector_memory.store_memory(
-                    agent_id=target_agent,
-                    content=f"Resolution for task '{task_desc[:120]}': {specialist_output[:300]}",
-                    category="past_resolution",
-                )
+                # Feed tool output back to Marcus so he can chain another tool or synthesize final answer
+                if turn + 1 < MAX_TOOL_TURNS and tokens_used < token_budget:
+                    messages.append({"role": "assistant", "content": "", "tool_calls": [call]})
+                    messages.append({
+                        "role": "tool",
+                        "content": json.dumps(tool_result)[:4000],
+                    })
+                    llm_resp = await call_llm_chat(
+                        task_id=task_id,
+                        agent_name="manager",
+                        messages=messages,
+                        tools=TOOL_SCHEMAS,
+                        max_tokens=1500,
+                        temperature=0.1,
+                    )
+                    tokens_used += llm_resp["metrics"]["total_tokens"]
+                    tool_calls = llm_resp["tool_calls"]
+                    final_synthesized = (llm_resp["content"] or "").strip()
+                else:
+                    tool_calls = []
+
+            if len(executed_tools) == 1 and last_formatted:
+                formatted_result = last_formatted
+            elif final_synthesized:
+                formatted_result = final_synthesized
             else:
-                tool_result = await execute_tool(tool_name, args)
-                last_formatted = format_tool_result(tool_name, tool_result, args)
+                formatted_result = last_formatted or "Completed multi-step execution."
 
-            if not (tool_result.get("ok", True) and "error" not in tool_result):
-                last_tool_ok = False
-                last_tool_err = str(tool_result.get("error") or "Unknown error")
+            # Step Final: Tool-Aware Auditor Verification
+            yield emit(
+                "agent_status",
+                {
+                    "agent": "auditor",
+                    "phase": "auditing",
+                    "message": "Auditor Agent is verifying execution output and ensuring zero hallucinations...",
+                },
+            )
+
+            tools_summary = ", ".join(f"`{t}`" for t in executed_tools)
+            audit_ok = last_tool_ok
+            audit_findings = (
+                f"Verified execution of {tools_summary} ({len(executed_tools)} step(s)). Zero stray communications detected."
+                if audit_ok
+                else f"Execution of {tools_summary} encountered error: {last_tool_err}"
+            )
+            audit_status = "PASS" if audit_ok else "QUALITY_IMPROVEMENT_NEEDED"
+            quality_score = 10 if audit_ok else 3
+
+            log_audit_result(
+                task_id=task_id,
+                user_request=user_message,
+                routed_agent=",".join(delegated_agent_names) if delegated_agent_names else "manager",
+                workflow_id=executed_tools[-1] if executed_tools else "manager_pipeline",
+                audit_status=audit_status,
+                quality_score=quality_score,
+                findings=audit_findings,
+            )
 
             step_num += 1
-            exec_trace = {
+            audit_trace = {
                 "step": step_num,
-                "agent": specialist_name if tool_name == "delegate_to_agent" else "IT Agent",
-                "role": f"Specialist ({specialist_info['role']})" if tool_name == "delegate_to_agent" else "Tool Execution Gateway",
-                "result": {
-                    "tool": tool_name,
-                    "status": "SUCCESS" if tool_result.get("ok", True) else "FAILED",
-                    "raw_result": tool_result,
+                "agent": "Auditor Agent",
+                "role": "Quality & Compliance Audit",
+                "report": {
+                    "audit_status": audit_status,
+                    "quality_score": quality_score,
+                    "findings": audit_findings,
                 },
-                "metrics": {"duration_ms": tool_result.get("duration_ms", 50), "total_tokens": 0},
+                "metrics": {"duration_ms": 2, "total_tokens": 0},
                 "tokens_remaining": max(0, token_budget - tokens_used),
             }
-            trace_steps.append(exec_trace)
-            yield emit("agent_trace", {"trace": exec_trace})
+            trace_steps.append(audit_trace)
+            yield emit("agent_trace", {"trace": audit_trace})
 
-            # Feed tool output back to Marcus so he can chain another tool or synthesize final answer
-            if turn + 1 < MAX_TOOL_TURNS and tokens_used < token_budget:
-                messages.append({"role": "assistant", "content": "", "tool_calls": [call]})
-                messages.append({
-                    "role": "tool",
-                    "content": json.dumps(tool_result)[:4000],
-                })
-                llm_resp = await call_llm_chat(
-                    task_id=task_id,
-                    agent_name="manager",
-                    messages=messages,
-                    tools=TOOL_SCHEMAS,
-                    max_tokens=1500,
-                    temperature=0.1,
+            # Save assistant reply to chat history (user turn already persisted at pipeline start)
+            add_chat_message(session_id, "assistant", formatted_result, tool_calls=[{"name": t} for t in executed_tools])
+
+            # Log request flow for the Agent Query Logs Inspector
+            try:
+                agents_in_flow = ["Marcus Vance"] + delegated_agent_names + ["Audrey Chen"]
+                steps_summary = [
+                    {
+                        "step": "Planning & Orchestration",
+                        "agent": "Marcus Vance",
+                        "action": f"Analyzed prompt: '{user_message[:60]}...'",
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(start_time)),
+                        "status": "ok",
+                    },
+                    {
+                        "step": f"Tool Execution ({', '.join(executed_tools)})",
+                        "agent": delegated_agent_names[-1] if delegated_agent_names else "Marcus Vance",
+                        "action": f"Executed {len(executed_tools)} tool step(s): {', '.join(executed_tools)}",
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        "status": "ok" if audit_ok else "warning",
+                    },
+                    {
+                        "step": "Quality & Verification",
+                        "agent": "Audrey Chen",
+                        "action": f"Audit verification ({audit_status}, quality: {quality_score}/10)",
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        "status": "ok" if audit_ok else "warning",
+                    },
+                ]
+                log_request_flow(
+                    flow_id=f"flow_chat_{task_id}",
+                    source="Manager Chat UI",
+                    title=f"Chat: {user_message[:50]}",
+                    status="completed" if audit_ok else "warning",
+                    agents_involved=agents_in_flow,
+                    steps=steps_summary,
+                    payload_preview={"input": user_message, "tools": executed_tools},
+                    result_summary=formatted_result[:140],
+                    duration_ms=int((time.time() - start_time) * 1000),
                 )
-                tokens_used += llm_resp["metrics"]["total_tokens"]
-                tool_calls = llm_resp["tool_calls"]
-                final_synthesized = (llm_resp["content"] or "").strip()
-            else:
-                tool_calls = []
+            except Exception as e:
+                logger.warning(f"Could not log tool request flow: {e}")
 
-        if len(executed_tools) == 1 and last_formatted:
-            formatted_result = last_formatted
-        elif final_synthesized:
-            formatted_result = final_synthesized
-        else:
-            formatted_result = last_formatted or "Completed multi-step execution."
+            # Deliver final content
+            yield emit("item", {"content": formatted_result})
+            yield emit(
+                "complete",
+                {
+                    "success": audit_ok,
+                    "workflow_executed": "crmRelaticleAssistant",
+                    "trace": trace_steps,
+                    "tokens_used": tokens_used,
+                    "token_budget": token_budget,
+                },
+            )
+            yield emit(
+                "agent_summary",
+                {
+                    "success": audit_ok,
+                    "workflow_executed": "crmRelaticleAssistant",
+                    "trace_steps": trace_steps,
+                    "tokens_used": tokens_used,
+                    "token_budget": token_budget,
+                },
+            )
+            return
 
-        # Step Final: Tool-Aware Auditor Verification
+        # -------------------------------------------------------------------------
+        # Path B: Direct Conversational / Capability Response (0 Tool Calls)
+        # -------------------------------------------------------------------------
         yield emit(
             "agent_status",
             {
-                "agent": "auditor",
-                "phase": "auditing",
-                "message": "Auditor Agent is verifying execution output and ensuring zero hallucinations...",
+                "agent": "manager",
+                "phase": "answering",
+                "message": "Manager Agent formulated a direct strategic response...",
             },
         )
-
-        tools_summary = ", ".join(f"`{t}`" for t in executed_tools)
-        audit_ok = last_tool_ok
-        audit_findings = (
-            f"Verified execution of {tools_summary} ({len(executed_tools)} step(s)). Zero stray communications detected."
-            if audit_ok
-            else f"Execution of {tools_summary} encountered error: {last_tool_err}"
-        )
-        audit_status = "PASS" if audit_ok else "QUALITY_IMPROVEMENT_NEEDED"
-        quality_score = 10 if audit_ok else 3
 
         log_audit_result(
             task_id=task_id,
             user_request=user_message,
-            routed_agent=",".join(delegated_agent_names) if delegated_agent_names else "manager",
-            workflow_id=executed_tools[-1] if executed_tools else "manager_pipeline",
-            audit_status=audit_status,
-            quality_score=quality_score,
-            findings=audit_findings,
+            routed_agent="manager",
+            workflow_id=None,
+            audit_status="PASS",
+            quality_score=10,
+            findings="Manager answered directly and concisely without unnecessary IT Agent tool overhead.",
         )
 
-        step_num += 1
-        audit_trace = {
-            "step": step_num,
-            "agent": "Auditor Agent",
-            "role": "Quality & Compliance Audit",
-            "report": {
-                "audit_status": audit_status,
-                "quality_score": quality_score,
-                "findings": audit_findings,
-            },
-            "metrics": {"duration_ms": 2, "total_tokens": 0},
+        step1_trace = {
+            "step": 1,
+            "agent": "Manager Agent",
+            "role": "Direct Strategic Response",
+            "result": {"status": "DIRECT_ANSWER_DELIVERED"},
+            "metrics": llm_resp["metrics"],
             "tokens_remaining": max(0, token_budget - tokens_used),
         }
-        trace_steps.append(audit_trace)
-        yield emit("agent_trace", {"trace": audit_trace})
+        trace_steps.append(step1_trace)
+        yield emit("agent_trace", {"trace": step1_trace})
 
-        # Save to chat history
-        add_chat_message(session_id, "user", user_message)
-        add_chat_message(session_id, "assistant", formatted_result, tool_calls=[{"name": t} for t in executed_tools])
+        final_msg = direct_content.strip() or "I have processed your request."
+        add_chat_message(session_id, "assistant", final_msg)
 
-        # Log request flow for the Agent Query Logs Inspector
+        # Log request flow for the Virtual Office Floor Inspector
         try:
-            agents_in_flow = ["Marcus Vance"] + delegated_agent_names + ["Audrey Chen"]
             steps_summary = [
                 {
                     "step": "Planning & Orchestration",
@@ -1208,43 +1311,43 @@ async def run_multi_agent_pipeline(
                     "action": f"Analyzed prompt: '{user_message[:60]}...'",
                     "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(start_time)),
                     "status": "ok",
-                },
-                {
-                    "step": f"Tool Execution ({', '.join(executed_tools)})",
-                    "agent": delegated_agent_names[-1] if delegated_agent_names else "Marcus Vance",
-                    "action": f"Executed {len(executed_tools)} tool step(s): {', '.join(executed_tools)}",
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    "status": "ok" if audit_ok else "warning",
-                },
-                {
-                    "step": "Quality & Verification",
-                    "agent": "Audrey Chen",
-                    "action": f"Audit verification ({audit_status}, quality: {quality_score}/10)",
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    "status": "ok" if audit_ok else "warning",
-                },
+                }
             ]
+            if invoked_tool_name:
+                steps_summary.append({
+                    "step": f"Tool Execution ({invoked_tool_name})",
+                    "agent": "Marcus Vance",
+                    "action": f"Executed tool `{invoked_tool_name}` with parameters: {json.dumps(invoked_tool_args)[:120]}",
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "status": "ok" if (tool_result or {}).get("ok", True) else "warning",
+                })
+            steps_summary.append({
+                "step": "Quality & Verification",
+                "agent": "Audrey Chen",
+                "action": f"Audit quality verified (tokens: {tokens_used}, duration: {int((time.time() - start_time) * 1000)}ms)",
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "status": "ok",
+            })
             log_request_flow(
                 flow_id=f"flow_chat_{task_id}",
                 source="Manager Chat UI",
                 title=f"Chat: {user_message[:50]}",
-                status="completed" if audit_ok else "warning",
-                agents_involved=agents_in_flow,
+                status="completed",
+                agents_involved=["Marcus Vance", "Audrey Chen"],
                 steps=steps_summary,
-                payload_preview={"input": user_message, "tools": executed_tools},
-                result_summary=formatted_result[:140],
+                payload_preview={"input": user_message, "session_id": session_id},
+                result_summary=final_msg[:120],
                 duration_ms=int((time.time() - start_time) * 1000),
             )
         except Exception as e:
-            logger.warning(f"Could not log tool request flow: {e}")
+            logger.warning(f"Could not log chat flow: {e}")
 
-        # Deliver final content
-        yield emit("item", {"content": formatted_result})
+        yield emit("item", {"content": final_msg})
         yield emit(
             "complete",
             {
-                "success": audit_ok,
-                "workflow_executed": "crmRelaticleAssistant",
+                "success": True,
+                "workflow_executed": None,
                 "trace": trace_steps,
                 "tokens_used": tokens_used,
                 "token_budget": token_budget,
@@ -1253,110 +1356,25 @@ async def run_multi_agent_pipeline(
         yield emit(
             "agent_summary",
             {
-                "success": audit_ok,
-                "workflow_executed": "crmRelaticleAssistant",
+                "success": True,
+                "workflow_executed": None,
                 "trace_steps": trace_steps,
                 "tokens_used": tokens_used,
                 "token_budget": token_budget,
             },
         )
-        return
-
-    # -------------------------------------------------------------------------
-    # Path B: Direct Conversational / Capability Response (0 Tool Calls)
-    # -------------------------------------------------------------------------
-    yield emit(
-        "agent_status",
-        {
-            "agent": "manager",
-            "phase": "answering",
-            "message": "Manager Agent formulated a direct strategic response...",
-        },
-    )
-
-    log_audit_result(
-        task_id=task_id,
-        user_request=user_message,
-        routed_agent="manager",
-        workflow_id=None,
-        audit_status="PASS",
-        quality_score=10,
-        findings="Manager answered directly and concisely without unnecessary IT Agent tool overhead.",
-    )
-
-    step1_trace = {
-        "step": 1,
-        "agent": "Manager Agent",
-        "role": "Direct Strategic Response",
-        "result": {"status": "DIRECT_ANSWER_DELIVERED"},
-        "metrics": llm_resp["metrics"],
-        "tokens_remaining": max(0, token_budget - tokens_used),
-    }
-    trace_steps.append(step1_trace)
-    yield emit("agent_trace", {"trace": step1_trace})
-
-    final_msg = direct_content.strip() or "I have processed your request."
-    add_chat_message(session_id, "user", user_message)
-    add_chat_message(session_id, "assistant", final_msg)
-
-    # Log request flow for the Virtual Office Floor Inspector
-    try:
-        steps_summary = [
+    except Exception as pipeline_err:
+        logger.exception(f"Pipeline error for task {task_id}: {pipeline_err}")
+        err_msg = f"⚠️ Request failed before completion: {pipeline_err}"
+        add_chat_message(session_id, "assistant", err_msg)
+        yield emit("item", {"content": err_msg})
+        yield emit(
+            "complete",
             {
-                "step": "Planning & Orchestration",
-                "agent": "Marcus Vance",
-                "action": f"Analyzed prompt: '{user_message[:60]}...'",
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(start_time)),
-                "status": "ok",
-            }
-        ]
-        if invoked_tool_name:
-            steps_summary.append({
-                "step": f"Tool Execution ({invoked_tool_name})",
-                "agent": "Marcus Vance",
-                "action": f"Executed tool `{invoked_tool_name}` with parameters: {json.dumps(invoked_tool_args)[:120]}",
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "status": "ok" if (tool_result or {}).get("ok", True) else "warning",
-            })
-        steps_summary.append({
-            "step": "Quality & Verification",
-            "agent": "Audrey Chen",
-            "action": f"Audit quality verified (tokens: {tokens_used}, duration: {int((time.time() - start_time) * 1000)}ms)",
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "status": "ok",
-        })
-        log_request_flow(
-            flow_id=f"flow_chat_{task_id}",
-            source="Manager Chat UI",
-            title=f"Chat: {user_message[:50]}",
-            status="completed",
-            agents_involved=["Marcus Vance", "Audrey Chen"],
-            steps=steps_summary,
-            payload_preview={"input": user_message, "session_id": session_id},
-            result_summary=final_msg[:120],
-            duration_ms=int((time.time() - start_time) * 1000),
+                "success": False,
+                "error": str(pipeline_err),
+                "trace": trace_steps,
+                "tokens_used": tokens_used,
+                "token_budget": token_budget,
+            },
         )
-    except Exception as e:
-        logger.warning(f"Could not log chat flow: {e}")
-
-    yield emit("item", {"content": final_msg})
-    yield emit(
-        "complete",
-        {
-            "success": True,
-            "workflow_executed": None,
-            "trace": trace_steps,
-            "tokens_used": tokens_used,
-            "token_budget": token_budget,
-        },
-    )
-    yield emit(
-        "agent_summary",
-        {
-            "success": True,
-            "workflow_executed": None,
-            "trace_steps": trace_steps,
-            "tokens_used": tokens_used,
-            "token_budget": token_budget,
-        },
-    )

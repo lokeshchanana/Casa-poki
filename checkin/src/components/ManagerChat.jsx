@@ -407,8 +407,21 @@ export default function ManagerChat({ onBackToCheckIn }) {
   };
 
   const handleSend = async (textToSend) => {
-    const text = (textToSend || input).trim();
-    if (!text || isStreaming) return;
+    const rawText = (textToSend || input).trim();
+    if (!rawText || isStreaming) return;
+
+    // If the user types "try again" / "retry" right after a failed/aborted query,
+    // resend the exact failed prompt instead of letting the backend guess an older turn.
+    let text = rawText;
+    if (/^(try\s+again|retry)\.?$/i.test(rawText)) {
+      const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+      if (lastAssistant?.failedPrompt) {
+        text = lastAssistant.failedPrompt;
+      } else if (lastAssistant?.content?.startsWith('⚠️')) {
+        const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+        if (lastUser?.content) text = lastUser.content;
+      }
+    }
 
     setInput('');
     const userMsgId = 'user_' + Date.now();
@@ -539,7 +552,8 @@ export default function ManagerChat({ onBackToCheckIn }) {
               ? {
                   ...m,
                   content:
-                    '⚠️ Stream ended before final output was received. Please retry your request.',
+                    '⚠️ Stream ended before final output was received. Click Retry below to run this exact query again.',
+                  failedPrompt: text,
                   isThinking: false
                 }
               : m
@@ -554,7 +568,12 @@ export default function ManagerChat({ onBackToCheckIn }) {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantMsgId
-              ? { ...m, content: (m.content || '') + '\n\n*(Execution stopped)*', isThinking: false }
+              ? {
+                  ...m,
+                  content: (m.content || '') + '\n\n*(Execution stopped)*',
+                  failedPrompt: text,
+                  isThinking: false
+                }
               : m
           )
         );
@@ -565,6 +584,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
               ? {
                   ...m,
                   content: `⚠️ Error contacting Multi-Agent Manager Hub: ${err.message}`,
+                  failedPrompt: text,
                   isThinking: false
                 }
               : m
@@ -1150,6 +1170,19 @@ export default function ManagerChat({ onBackToCheckIn }) {
                     </div>
                   ) : (
                     <div>{renderMarkdown(m.content)}</div>
+                  )}
+
+                  {!isUser && m.failedPrompt && !isStreaming && (
+                    <div className="mt-2.5 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleSend(m.failedPrompt)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs transition-colors"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        Retry Query
+                      </button>
+                    </div>
                   )}
 
                   {!isUser && m.content && (

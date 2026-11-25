@@ -122,6 +122,41 @@ class TestOrchestratorAndPhoneHelpers(unittest.TestCase):
         self.assertEqual(format_e164_sms("1-801-860-1052"), "+18018601052")
         self.assertIsNone(format_e164_sms("123"))
 
+    def test_failed_turn_persists_user_prompt_for_retry(self):
+        import asyncio
+        import tempfile
+        import unittest.mock as mock
+        import orchestrator
+        import state_store
+
+        orig_db = state_store.DB_PATH
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_store.DB_PATH = os.path.join(tmpdir, "test_agent_system.db")
+            state_store.init_store()
+            try:
+                async def boom(*args, **kwargs):
+                    raise RuntimeError("Simulated connection drop")
+
+                async def run_test():
+                    events = []
+                    with mock.patch.object(orchestrator, "call_llm_chat", side_effect=boom):
+                        async for ev in orchestrator.run_multi_agent_pipeline(
+                            "Check Cloudflare invoice IN-84013759", session_id="test_retry_sess"
+                        ):
+                            events.append(ev)
+                    return events
+
+                events = asyncio.run(run_test())
+                hist = state_store.get_chat_history("test_retry_sess", limit=10)
+                self.assertEqual(len(hist), 2)
+                self.assertEqual(hist[0]["role"], "user")
+                self.assertEqual(hist[0]["content"], "Check Cloudflare invoice IN-84013759")
+                self.assertEqual(hist[1]["role"], "assistant")
+                self.assertIn("Request failed before completion", hist[1]["content"])
+                self.assertTrue(any('"success": false' in e.lower() for e in events))
+            finally:
+                state_store.DB_PATH = orig_db
+
 
 if __name__ == "__main__":
     unittest.main()
