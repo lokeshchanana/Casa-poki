@@ -9,7 +9,7 @@ import re
 from typing import Any, Dict, List, Optional
 import httpx
 
-from state_store import log_request_flow
+from state_store import cancel_post_close_drip, log_request_flow
 
 logger = logging.getLogger("brevo_sync")
 
@@ -111,14 +111,16 @@ async def sync_single_contact_to_brevo(
 
 
 async def handle_brevo_event(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Handles Brevo unsubscribe / hard_bounce / complaint events by disabling canEmail in Twenty CRM."""
+    """Handles Brevo unsubscribe / hardBounce / complaint / spam events by deleting the contact from Twenty CRM."""
     event = (payload.get("event") or "").strip().lower()
-    if event not in ("unsubscribed", "hard_bounce", "complaint"):
+    if event not in ("unsubscribed", "hard_bounce", "hardbounce", "complaint", "spam"):
         return {"success": False, "reason": f"Unhandled Brevo event '{event}'"}
 
     email = (payload.get("email") or "").strip().lower()
     if not email:
         return {"success": False, "reason": "No email in Brevo event"}
+
+    cancel_post_close_drip(email)
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         find_res = await client.get(
@@ -129,12 +131,15 @@ async def handle_brevo_event(payload: Dict[str, Any]) -> Dict[str, Any]:
         people = (find_res.json().get("data") or {}).get("people") or []
         if people:
             person_id = people[0].get("id")
-            await client.patch(
+            del_res = await client.delete(
                 f"{TWENTY_BASE_URL}/rest/people/{person_id}",
                 headers=_twenty_headers(),
-                json={"canEmail": False},
             )
-            action = "Marked canEmail = false in Twenty CRM"
+            action = (
+                "Deleted from Twenty CRM"
+                if 200 <= del_res.status_code < 300
+                else f"Failed to delete from Twenty CRM (HTTP {del_res.status_code})"
+            )
         else:
             action = "Contact not found in Twenty CRM"
 
@@ -176,7 +181,7 @@ async def sync_twenty_to_brevo() -> Dict[str, Any]:
 
         for p in people:
             email = ((p.get("emails") or {}).get("primaryEmail") or "").strip().lower()
-            if not email:
+            if not email or p.get("canEmail") is False:
                 skipped_no_email += 1
                 continue
 
