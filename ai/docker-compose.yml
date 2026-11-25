@@ -50,25 +50,3 @@ services:
       - OLLAMA_BASE_URL=http://ollama-intel:11434 
     #volumes:
     #  - /tank/ollama/crew-app:/app
-
-  n8n:
-    image: docker.n8n.io/n8nio/n8n:latest
-    container_name: n8n
-    restart: always
-    ports:
-      - "5678:5678"
-    environment:
-      - N8N_HOST=0.0.0.0
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - NODE_ENV=production
-      - WEBHOOK_URL=http://localhost:5678/
-      - GENERIC_TIMEZONE=America/Los_Angeles
-      - TZ=America/Los_Angeles
-    volumes:
-      - /tank/ollama/n8n_data:/home/node/.n8n
-    depends_on:
-      - ollama-intel
-
-volumes:
-  n8n_data:

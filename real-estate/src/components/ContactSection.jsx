@@ -59,7 +59,7 @@ export default function ContactSection() {
     };
 
     try {
-      const response = await fetch('https://n8n.lokeshchanana.com/webhook/website-contact', {
+      const response = await fetch('https://agents.lokeshchanana.com/webhook/website-contact', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

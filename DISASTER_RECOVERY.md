@@ -43,7 +43,7 @@ sudo ./scripts/restore-casa-poki.sh
 4. **Secrets & Symlinks**: Automatically re-links all `.env` files from `/tank/<service>/.env` into the respective repository directories.
 5. **Docker Networks**: Recreates `postgres-network` and `relaticle-internal`.
 6. **Antigravity CLI**: Restores `agy` binary to `~/.local/bin/agy`, restores `settings.json`, configures user linger, and starts the systemd daemon.
-7. **Containers**: Brings up all services in dependency order (`postgres`, `twenty`, `relaticle`, `n8n`, `monitor`, `ollama`, `nginx`, `cloudflared`, `real-estate`, etc.).
+7. **Containers**: Brings up all services in dependency order (`postgres`, `twenty`, `relaticle`, `monitor`, `ollama`, `nginx`, `cloudflared`, `real-estate`, `agents`, etc.).
 8. **Nightly Sync**: Installs and activates `casa-poki-sync.timer`.
 
 ---

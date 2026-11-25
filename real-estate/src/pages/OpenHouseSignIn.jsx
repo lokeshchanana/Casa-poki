@@ -320,7 +320,7 @@ export default function OpenHouseSignIn() {
     };
 
     try {
-      const webhookUrl = 'https://n8n.lokeshchanana.com/webhook/open-house-sign-in';
+      const webhookUrl = 'https://agents.lokeshchanana.com/webhook/open-house-sign-in';
       const res = await fetch(webhookUrl, {
         method: 'POST',
         headers: {
@@ -510,7 +510,7 @@ export default function OpenHouseSignIn() {
     localStorage.setItem('oh_sign_in_roster', JSON.stringify(nextRoster));
 
     try {
-      const webhookUrl = 'https://n8n.lokeshchanana.com/webhook/open-house-sign-in';
+      const webhookUrl = 'https://agents.lokeshchanana.com/webhook/open-house-sign-in';
       const res = await fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
