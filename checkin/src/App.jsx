@@ -24,7 +24,7 @@ export default function App() {
 
   return (
     <ThemeProvider>
-      <div className="min-h-screen bg-ivory dark:bg-charcoal text-neutral-900 dark:text-neutral-100 flex flex-col font-sans transition-colors duration-300">
+      <div className="min-h-[100dvh] bg-ivory dark:bg-charcoal text-neutral-900 dark:text-neutral-100 flex flex-col font-sans transition-colors duration-300">
         <AppNavigation 
           activeTab={activeTab} 
           setActiveTab={setActiveTab} 

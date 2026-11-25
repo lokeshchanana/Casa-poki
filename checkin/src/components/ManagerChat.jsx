@@ -20,7 +20,8 @@ import {
   FileCode2,
   Plus,
   RefreshCw,
-  ClipboardList
+  ClipboardList,
+  ArrowDown
 } from 'lucide-react';
 
 const SUGGESTED_PROMPTS = [
@@ -29,20 +30,20 @@ const SUGGESTED_PROMPTS = [
     prompt: 'Ask Victor Sterling to run a full tax audit on Fiona\'s expenses'
   },
   {
+    label: 'Check Unread Emails',
+    prompt: 'Ask Silas Drake to check unread emails in my mailbox and summarize urgent client inquiries'
+  },
+  {
+    label: 'Check Home Assistant',
+    prompt: 'Ask Hannah Reed to check Home Assistant health and fix any issues'
+  },
+  {
+    label: 'Scan Drive Bills',
+    prompt: 'Ask Fiona Banks to scan Google Drive Expanses folder for new bills'
+  },
+  {
     label: 'CRM Contact Lookup',
     prompt: 'Search for contacts in Twenty CRM'
-  },
-  {
-    label: 'Test Missing Workflow (GBP)',
-    prompt: 'Post a weekly market update on Google Business Profile for Bellevue'
-  },
-  {
-    label: 'Test Missing Workflow (Mailman)',
-    prompt: 'Check unread emails in my mailbox and summarize urgent client inquiries'
-  },
-  {
-    label: 'Test Inactive Workflow (Calendar->GBP)',
-    prompt: 'Sync open house events from Google Calendar to Google Business Profile'
   },
   {
     label: 'Teach Agent Rule',
@@ -59,6 +60,40 @@ function renderMarkdown(text) {
   let listItems = [];
   let inCodeBlock = false;
   let codeLines = [];
+  let tableRows = [];
+
+  const flushTable = (keyPrefix) => {
+    if (tableRows.length === 0) return;
+    const headerRow = tableRows[0];
+    const bodyRows = tableRows.slice(1).filter((r) => !r.every((c) => /^:?-+:?$/.test(c.trim())));
+    elements.push(
+      <div key={`tbl-${keyPrefix}`} className="my-2.5 overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-700">
+        <table className="min-w-full text-left text-xs border-collapse">
+          <thead className="bg-neutral-200/70 dark:bg-neutral-900/80 text-neutral-800 dark:text-neutral-200">
+            <tr>
+              {headerRow.map((cell, ci) => (
+                <th key={ci} className="px-3 py-2 font-semibold border-b border-neutral-200 dark:border-neutral-700 whitespace-nowrap">
+                  {parseInline(cell.trim())}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-neutral-200 dark:divide-neutral-700/70 bg-white/70 dark:bg-charcoal-dark/50">
+            {bodyRows.map((row, ri) => (
+              <tr key={ri}>
+                {row.map((cell, ci) => (
+                  <td key={ci} className="px-3 py-1.5 text-neutral-800 dark:text-neutral-200 align-top">
+                    {parseInline(cell.trim())}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+    tableRows = [];
+  };
 
   const parseInline = (str) => {
     const parts = [];
@@ -141,6 +176,14 @@ function renderMarkdown(text) {
       return;
     }
 
+    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+      flushList();
+      const cells = trimmed.slice(1, -1).split('|');
+      tableRows.push(cells);
+      return;
+    }
+    flushTable(index);
+
     if (!trimmed) {
       flushList();
       elements.push(<div key={`space-${index}`} className="h-2" />);
@@ -219,6 +262,7 @@ function renderMarkdown(text) {
   });
 
   flushList();
+  flushTable('end');
   return elements;
 }
 
@@ -245,6 +289,8 @@ export default function ManagerChat({ onBackToCheckIn }) {
   const [expandedTraces, setExpandedTraces] = useState({});
   const [dashboardData, setDashboardData] = useState(null);
   const [sessions, setSessions] = useState([]);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [viewportHeight, setViewportHeight] = useState(null);
   const [newLessonAgent, setNewLessonAgent] = useState('manager');
   const [newLessonRule, setNewLessonRule] = useState('');
   const [abortController, setAbortController] = useState(null);
@@ -255,7 +301,29 @@ export default function ManagerChat({ onBackToCheckIn }) {
   });
 
   const messagesEndRef = useRef(null);
+  const messagesScrollRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Track mobile virtual keyboard height via VisualViewport API so input stays above keyboard
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const updateHeight = () => {
+      // Only override height when viewport shrinks significantly (keyboard open)
+      if (vv.height < window.innerHeight - 80) {
+        setViewportHeight(Math.max(280, vv.height - 64));
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 60);
+      } else {
+        setViewportHeight(null);
+      }
+    };
+    vv.addEventListener('resize', updateHeight);
+    vv.addEventListener('scroll', updateHeight);
+    return () => {
+      vv.removeEventListener('resize', updateHeight);
+      vv.removeEventListener('scroll', updateHeight);
+    };
+  }, []);
 
   const getApiBase = () => {
     if (
@@ -612,7 +680,10 @@ export default function ManagerChat({ onBackToCheckIn }) {
   const lessonsCount = dashboardData?.lessons?.length ?? 0;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-64px)] max-w-5xl mx-auto w-full bg-white dark:bg-charcoal-dark border-x border-neutral-200 dark:border-neutral-800 shadow-xl transition-colors">
+    <div
+      className="flex flex-col h-[calc(100dvh-64px)] max-w-5xl mx-auto w-full bg-white dark:bg-charcoal-dark border-x border-neutral-200 dark:border-neutral-800 shadow-xl transition-colors"
+      style={viewportHeight ? { height: `${viewportHeight}px` } : undefined}
+    >
       {/* Top Multi-Agent Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50/90 dark:bg-charcoal/90 backdrop-blur">
         <div className="flex items-center gap-3">
@@ -642,7 +713,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
               <span>•</span>
               <span className="inline-flex items-center gap-1">
                 <Gauge className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                Budget: 2,000 tok/task
+                Budget: 64k tok/task
               </span>
             </p>
           </div>
@@ -684,7 +755,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
                 ? 'bg-amber-600 text-white border-amber-600'
                 : 'bg-white dark:bg-charcoal border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:border-amber-500'
             }`}
-            title="Missing n8n Workflow Specs for Antigravity"
+            title="Capability Backlog Specs"
           >
             <FileCode2 className="w-3.5 h-3.5 text-amber-500" />
             <span>Specs ({backlogCount})</span>
@@ -762,7 +833,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
           <div className="flex items-center justify-between mb-2.5">
             <h3 className="font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
               <Workflow className="w-4 h-4 text-cyan-500" />
-              IT Agent — Live n8n Workflow Registry
+              Agent Hub — Native Tool &amp; Webhook Registry
             </h3>
             <button
               type="button"
@@ -997,7 +1068,14 @@ export default function ManagerChat({ onBackToCheckIn }) {
       )}
 
       {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+      <div
+        ref={messagesScrollRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          setShowScrollBottom(el.scrollHeight - el.scrollTop - el.clientHeight > 120);
+        }}
+        className="relative flex-1 overflow-y-auto p-4 sm:p-6 space-y-5"
+      >
         {messages.map((m) => {
           const isUser = m.role === 'user';
           const hasTrace = Array.isArray(m.trace) && m.trace.length > 0;
@@ -1189,7 +1267,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
                     <button
                       type="button"
                       onClick={() => handleCopy(m.id, m.content)}
-                      className="absolute top-2 right-2 p-1 rounded hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="absolute top-2 right-2 p-1 rounded hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 opacity-75 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                       title="Copy response"
                     >
                       {copiedId === m.id ? (
@@ -1215,27 +1293,59 @@ export default function ManagerChat({ onBackToCheckIn }) {
           );
         })}
         <div ref={messagesEndRef} />
+
+        {showScrollBottom && (
+          <div className="sticky bottom-2 z-10 flex justify-end pointer-events-none">
+            <button
+              type="button"
+              onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })}
+              className="pointer-events-auto p-2 rounded-full bg-white/95 dark:bg-charcoal-light/95 border border-neutral-200 dark:border-neutral-700 shadow-lg text-neutral-600 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-all"
+              title="Scroll to bottom"
+            >
+              <ArrowDown className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Input Form Bar */}
-      <div className="p-3 sm:p-4 border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-charcoal/50">
+      <div className="p-3 sm:p-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-charcoal/50">
         <form
           onSubmit={(e) => {
             e.preventDefault();
             handleSend();
+            if (inputRef.current) inputRef.current.style.height = 'auto';
           }}
-          className="relative flex items-center gap-2"
+          className="relative flex items-end gap-2"
         >
           <div className="relative flex-1">
             <textarea
               ref={inputRef}
               rows={1}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Instruct Manager Agent (e.g. Search CRM, check n8n workflows, post to GBP, or 'Remember: ...')"
+              onChange={(e) => {
+                setInput(e.target.value);
+                e.target.style.height = 'auto';
+                e.target.style.height = `${Math.min(e.target.scrollHeight, 140)}px`;
+              }}
+              onFocus={() => {
+                setTimeout(() => {
+                  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                }, 150);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && inputRef.current) {
+                  setTimeout(() => {
+                    if (inputRef.current && !inputRef.current.value) {
+                      inputRef.current.style.height = 'auto';
+                    }
+                  }, 0);
+                }
+                handleKeyDown(e);
+              }}
+              placeholder="Instruct Manager Agent (e.g. Run CPA audit, check emails, check HA, or 'Remember: ...')"
               className="w-full bg-white dark:bg-charcoal border border-neutral-300 dark:border-neutral-700 rounded-xl px-4 py-3 text-xs sm:text-sm text-neutral-900 dark:text-white placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none shadow-sm transition-all"
-              style={{ minHeight: '44px', maxHeight: '120px' }}
+              style={{ minHeight: '44px', maxHeight: '140px' }}
             />
           </div>
 
@@ -1262,7 +1372,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
         </form>
 
         <p className="text-[10px] text-neutral-400 text-center mt-2 font-sans">
-          Pipeline: <strong>Manager</strong> (Routing & Learning) → <strong>IT Agent</strong> (n8n Catalog & Webhooks) → <strong>Auditor</strong> (Quality & Missing Workflow Spec).
+          Pipeline: <strong>Marcus Vance</strong> (Manager) → <strong>Specialist Agents</strong> → <strong>Audrey Chen</strong> (Auditor).
         </p>
       </div>
     </div>
