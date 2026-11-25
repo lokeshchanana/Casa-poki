@@ -304,6 +304,12 @@ export default function ManagerChat({ onBackToCheckIn }) {
   const messagesScrollRef = useRef(null);
   const inputRef = useRef(null);
 
+  const scrollToBottom = (smooth = false) => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+  };
+
   // Track mobile virtual keyboard height via VisualViewport API so input stays above keyboard
   useEffect(() => {
     const vv = window.visualViewport;
@@ -312,16 +318,14 @@ export default function ManagerChat({ onBackToCheckIn }) {
       // Only override height when viewport shrinks significantly (keyboard open)
       if (vv.height < window.innerHeight - 80) {
         setViewportHeight(Math.max(280, vv.height - 64));
-        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 60);
+        requestAnimationFrame(() => scrollToBottom(false));
       } else {
         setViewportHeight(null);
       }
     };
     vv.addEventListener('resize', updateHeight);
-    vv.addEventListener('scroll', updateHeight);
     return () => {
       vv.removeEventListener('resize', updateHeight);
-      vv.removeEventListener('scroll', updateHeight);
     };
   }, []);
 
@@ -396,7 +400,12 @@ export default function ManagerChat({ onBackToCheckIn }) {
   }, [sessionId]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 180;
+    if (nearBottom) {
+      scrollToBottom(false);
+    }
   }, [messages, isStreaming, activeAgentPhase]);
 
   const handleCopy = (id, text) => {
@@ -1074,7 +1083,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
           const el = e.currentTarget;
           setShowScrollBottom(el.scrollHeight - el.scrollTop - el.clientHeight > 120);
         }}
-        className="relative flex-1 overflow-y-auto p-4 sm:p-6 space-y-5"
+        className="relative flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-5"
       >
         {messages.map((m) => {
           const isUser = m.role === 'user';
@@ -1298,7 +1307,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
           <div className="sticky bottom-2 z-10 flex justify-end pointer-events-none">
             <button
               type="button"
-              onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })}
+              onClick={() => scrollToBottom(true)}
               className="pointer-events-auto p-2 rounded-full bg-white/95 dark:bg-charcoal-light/95 border border-neutral-200 dark:border-neutral-700 shadow-lg text-neutral-600 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-all"
               title="Scroll to bottom"
             >
@@ -1330,7 +1339,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
               }}
               onFocus={() => {
                 setTimeout(() => {
-                  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                  scrollToBottom(false);
                 }, 150);
               }}
               onKeyDown={(e) => {
