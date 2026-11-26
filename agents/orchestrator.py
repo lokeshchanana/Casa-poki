@@ -34,7 +34,7 @@ AGENT_BACKEND = os.environ.get("AGENT_BACKEND", "antigravity").lower()
 AGY_PATH = os.environ.get("AGY_PATH", "/usr/local/bin/agy")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://192.168.1.240:11434")
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "crm-qwen:3b")
-DEFAULT_TASK_BUDGET = int(os.environ.get("TASK_TOKEN_BUDGET", "64000"))
+DEFAULT_TASK_BUDGET = int(os.environ.get("TASK_TOKEN_BUDGET", "250000"))
 
 
 # =============================================================================

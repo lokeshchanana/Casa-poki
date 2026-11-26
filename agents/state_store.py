@@ -818,7 +818,7 @@ def get_system_summary() -> Dict[str, Any]:
         "token_stats": {
             "total_tokens_all_time": tot_row[0] if tot_row else 0,
             "avg_tokens_per_sec": round(tot_row[1], 1) if tot_row else 0.0,
-            "budget_per_task": 64000,
+            "budget_per_task": 250000,
             "throughput_target_tok_s": 500,
             "by_agent": by_agent,
         },

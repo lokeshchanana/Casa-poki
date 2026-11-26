@@ -14,7 +14,7 @@ services:
       - TWENTY_BASE_URL=http://192.168.1.240:8085
       - AGENT_DATA_DIR=/app/data
       - AGENT_BACKLOG_DIR=/app/backlog/missing_n8n_workflows
-      - TASK_TOKEN_BUDGET=64000
+      - TASK_TOKEN_BUDGET=250000
       - AGENT_BACKEND=antigravity
       - AGY_PATH=/usr/local/bin/agy
       - SOCIAL_STORAGE_DIR=/tank/social

@@ -278,7 +278,7 @@ const WELCOME_MESSAGE = {
   timestamp: '',
   trace: [],
   tokensUsed: 0,
-  tokenBudget: 64000
+  tokenBudget: 250000
 };
 
 export default function ManagerChat({ onBackToCheckIn }) {
@@ -388,7 +388,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
             timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
             trace: [],
             tokensUsed: 0,
-            tokenBudget: 64000,
+            tokenBudget: 250000,
             isThinking: false
           }));
           setMessages(loaded);
@@ -536,7 +536,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
         citations: [],
         approval: null,
         tokensUsed: 0,
-        tokenBudget: 64000,
+        tokenBudget: 250000,
         specCreated: null
       }
     ];
@@ -559,7 +559,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
         body: JSON.stringify({
           chatInput: text,
           sessionId: sessionId,
-          tokenBudget: 64000,
+          tokenBudget: 250000,
           attachments: currentAttachments
         }),
         signal: controller.signal
@@ -651,7 +651,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
                       citations: event.citations || m.citations || [],
                       approval: event.approval || m.approval || null,
                       tokensUsed: event.tokens_used || 0,
-                      tokenBudget: event.token_budget || 64000,
+                      tokenBudget: event.token_budget || 250000,
                       specCreated: event.spec_created || null,
                       isThinking: false
                     }
@@ -833,7 +833,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
               <span>•</span>
               <span className="inline-flex items-center gap-1">
                 <Gauge className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                Budget: 64k tok/task
+                Budget: 250k tok/task
               </span>
             </p>
           </div>
