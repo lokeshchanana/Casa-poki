@@ -929,6 +929,149 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Live Web Search (Tavily/Brave free-tier capped at 900/mo & 35/day, with 15-min cache and free Google News RSS fallback). Returns ranked URLs, snippets, and structured citations.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query string"},
+                    "max_results": {"type": "integer", "description": "Max results (default 5)"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "deep_search",
+            "description": "Grok-style iterative DeepSearch: decomposes a complex question into parallel sub-queries, fetches top web pages, and returns verified facts + citations.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "Research question to investigate deeply"},
+                    "depth": {"type": "integer", "description": "Research depth 1-2 (default 2)"},
+                },
+                "required": ["question"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_webpage",
+            "description": "Fetches and extracts clean readable text from a public http/https URL (SSRF-protected).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Public http/https URL"},
+                    "max_chars": {"type": "integer", "description": "Max characters to extract (default 8000)"},
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "inspect_artifact",
+            "description": "Searches or paginates a large tool output artifact stored by artifact_id so zero records are lost.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "artifact_id": {"type": "string", "description": "Artifact ID returned in a truncated tool preview"},
+                    "query": {"type": "string", "description": "Optional substring filter"},
+                    "offset": {"type": "integer", "description": "Pagination offset (default 0)"},
+                    "limit": {"type": "integer", "description": "Max items per page (default 25)"},
+                },
+                "required": ["artifact_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_plan",
+            "description": "TodoWrite equivalent: creates or updates the visible step-by-step execution checklist for complex multi-step tasks.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "array",
+                        "description": "List of plan steps with id, label, agent, and status (pending|in_progress|completed)",
+                        "items": {"type": "object"},
+                    },
+                },
+                "required": ["steps"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delegate_parallel",
+            "description": "Dispatches multiple independent specialist subagents concurrently (in parallel) and collects all their reports in one turn.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tasks": {
+                        "type": "array",
+                        "description": "List of {target_agent, task_description, context_data} objects",
+                        "items": {"type": "object"},
+                    },
+                },
+                "required": ["tasks"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "infra_list_containers",
+            "description": "Ian Torres (IT Agent) lists all live Docker containers on Casa-poki with status and health.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "infra_check_monitors",
+            "description": "Ian Torres (IT Agent) checks Uptime Kuma monitors for all Casa-poki services.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "infra_container_logs",
+            "description": "Ian Torres (IT Agent) fetches recent tail logs for a specific Docker container.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "container_name": {"type": "string", "description": "Docker container name"},
+                    "tail": {"type": "integer", "description": "Number of log lines (default 40)"},
+                },
+                "required": ["container_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "infra_restart_container",
+            "description": "Ian Torres (IT Agent) restarts a Docker container (requires HITL approval; production real-estate is blocked).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "container_name": {"type": "string", "description": "Docker container name to restart"},
+                },
+                "required": ["container_name"],
+            },
+        },
+    },
 ]
 
 from social_tools import SOCIAL_TOOL_DEFINITIONS, execute_social_tool
@@ -2574,6 +2717,58 @@ async def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             res = await execute_social_tool(name, args)
             res["duration_ms"] = int((time.time() - start_ts) * 1000)
             res["raw_payload_sent"] = args
+            return res
+
+        elif name == "web_search":
+            from web_research import web_search as _web_search
+            res = await _web_search(args.get("query", ""), max_results=int(args.get("max_results") or 5))
+            res["duration_ms"] = int((time.time() - start_ts) * 1000)
+            return res
+
+        elif name == "deep_search":
+            from web_research import deep_search as _deep_search
+            res = await _deep_search(args.get("question", ""), depth=int(args.get("depth") or 2))
+            res["duration_ms"] = int((time.time() - start_ts) * 1000)
+            return res
+
+        elif name == "fetch_webpage":
+            from web_research import fetch_webpage as _fetch_webpage
+            res = await _fetch_webpage(args.get("url", ""), max_chars=int(args.get("max_chars") or 8000))
+            res["duration_ms"] = int((time.time() - start_ts) * 1000)
+            return res
+
+        elif name == "inspect_artifact":
+            from context_manager import inspect_artifact_data
+            res = inspect_artifact_data(
+                artifact_id=args.get("artifact_id", ""),
+                query=args.get("query"),
+                offset=int(args.get("offset") or 0),
+                limit=int(args.get("limit") or 25),
+            )
+            res["duration_ms"] = int((time.time() - start_ts) * 1000)
+            return res
+
+        elif name == "infra_list_containers":
+            from infra_tools import list_docker_containers
+            res = list_docker_containers()
+            res["duration_ms"] = int((time.time() - start_ts) * 1000)
+            return res
+
+        elif name == "infra_check_monitors":
+            from infra_tools import check_uptime_kuma
+            res = check_uptime_kuma()
+            res["duration_ms"] = int((time.time() - start_ts) * 1000)
+            return res
+
+        elif name == "infra_container_logs":
+            from infra_tools import get_container_logs
+            logs = get_container_logs(args.get("container_name", ""), tail=int(args.get("tail") or 40))
+            return {"ok": True, "container_name": args.get("container_name"), "logs": logs, "duration_ms": int((time.time() - start_ts) * 1000)}
+
+        elif name == "infra_restart_container":
+            from infra_tools import restart_container
+            res = restart_container(args.get("container_name", ""))
+            res["duration_ms"] = int((time.time() - start_ts) * 1000)
             return res
 
     except Exception as direct_err:

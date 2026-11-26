@@ -1,6 +1,6 @@
 import asyncio
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -11,8 +11,14 @@ from infra_tools import (
     list_docker_containers,
     restart_container,
 )
+from multimodal import save_and_extract_attachment
 from n8n_catalog import get_n8n_workflows
-from orchestrator import DEFAULT_MODEL, DEFAULT_TASK_BUDGET, run_multi_agent_pipeline
+from orchestrator import (
+    DEFAULT_MODEL,
+    DEFAULT_TASK_BUDGET,
+    resume_approved_tool,
+    run_multi_agent_pipeline,
+)
 from state_store import (
     add_lesson,
     cancel_post_close_drip,
@@ -62,6 +68,13 @@ class ChatRequest(BaseModel):
     chatInput: str
     sessionId: Optional[str] = "manager_default"
     tokenBudget: Optional[int] = DEFAULT_TASK_BUDGET
+    attachments: Optional[List[Dict[str, Any]]] = None
+
+
+class ApprovalRequest(BaseModel):
+    approvalId: str
+    decision: str
+    editedArgs: Optional[Dict[str, Any]] = None
 
 
 class LessonRequest(BaseModel):
@@ -264,9 +277,35 @@ async def manager_chat(req: ChatRequest):
             user_message=req.chatInput.strip(),
             session_id=req.sessionId or "manager_primary",
             token_budget=budget,
+            attachments=req.attachments,
         ),
         media_type="application/x-ndjson",
     )
+
+
+@app.post("/api/manager/upload")
+async def manager_upload(file: UploadFile = File(...)) -> dict:
+    raw = await file.read()
+    res = save_and_extract_attachment(
+        filename=file.filename or "upload.bin",
+        content_bytes=raw,
+        content_type=file.content_type or "",
+    )
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Upload failed"))
+    return res
+
+
+@app.post("/api/manager/chat/approve")
+async def manager_chat_approve(req: ApprovalRequest) -> dict:
+    res = await resume_approved_tool(
+        approval_id=req.approvalId,
+        decision=req.decision,
+        edited_args=req.editedArgs,
+    )
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Approval failed"))
+    return res
 
 
 # =============================================================================

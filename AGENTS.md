@@ -25,3 +25,11 @@
 - **NFS Replication Sync**: Maintain the nightly replication (`casa-poki-sync.timer` at 02:00 AM) to `192.168.1.250`. If significant changes to tank configurations or datasets are made, run a sync (`sudo /usr/local/bin/casa-poki-sync.sh`) to ensure the NFS mirror is current.
 - **Disaster Recovery Script Maintenance**: After every major architectural change (adding a new service, new container, altered volume mounts, network adjustments, or ZFS dataset modifications), always verify and update `scripts/restore-casa-poki.sh` and `README.md` so the bare-metal restore engine stays 100% current and tested.
 - **Uptime Kuma Monitoring Synchronization**: Whenever adding, retiring, or changing ports/URLs of any service, always update `scripts/sync-uptime-kuma.py` and run `sudo python3 scripts/sync-uptime-kuma.py` so `/tank/monitor/uptime-kuma/kuma.db` and the `uptime-kuma` container stay 100% current (preventing stale alerts or auto-heal restarts of retired services).
+
+## 5. Zero-Spend External Search API Policy (CRITICAL)
+- **Strict Free-Tier-Only Rule:** Tavily and Brave Search APIs MUST NEVER incur any paid charges or overages under any circumstance.
+- **Hard Code-Level Caps:**
+  - **Tavily:** Hard cap at **900 credits/month** and **35 credits/day** (free tier is 1,000/month). Default to `search_depth="basic"` (1 credit). Never run `advanced` depth without explicit budget headroom.
+  - **Brave Search:** Hard cap at **900 requests/month** and **35 requests/day** (free tier is \$5/month ≈ 1,000 requests).
+- **Atomic Pre-Flight Ledger & Cache:** Every Tavily/Brave call must reserve quota in SQLite (`search_quota_usage`) *before* dispatching HTTP requests and use a 15-minute query cache.
+- **Automatic Free Fallback:** When either provider reaches its daily or monthly cap (or is rate-limited), immediately bypass the paid API and fall back to free Google-grounded `agy` `search_web` + Google News RSS.

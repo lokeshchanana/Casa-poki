@@ -115,33 +115,36 @@ def init_store() -> None:
     except sqlite3.OperationalError:
         pass
 
-    # Seed default lessons if empty
-    cur.execute("SELECT COUNT(*) FROM agent_lessons")
+    # Clean up retired n8n / Relaticle / Actual Budget legacy rules and ensure v2 native rules
+    cur.execute(
+        """
+        DELETE FROM agent_lessons
+        WHERE source IN ('system_seed', 'auditor_spec_actual_budget')
+           OR rule LIKE '%Actual Budget%'
+           OR rule LIKE '%Relaticle%'
+           OR rule LIKE '%active n8n workflow%'
+        """
+    )
+    cur.execute("SELECT COUNT(*) FROM agent_lessons WHERE source = 'v2_seed'")
     if cur.fetchone()[0] == 0:
         now = datetime.utcnow().isoformat() + "Z"
         seed_lessons = [
             (
                 "manager",
-                "Always check if an n8n workflow exists via the IT Agent before claiming a task can or cannot be automated.",
-                "system_seed",
-                now,
-            ),
-            (
-                "manager",
-                "Ration tokens strictly: keep internal agent routing JSON concise (<200 tokens) to preserve throughput budget.",
-                "system_seed",
+                "Use native Agent Hub tools (Twenty CRM, Bigcapital, Mailman, HA, Social Studio, Web Search) and delegate_to_agent directly; never invent missing n8n workflows.",
+                "v2_seed",
                 now,
             ),
             (
                 "it_agent",
-                "Never fabricate API responses. Only execute active n8n workflows; if a workflow is inactive or missing, return an explicit MISSING_WORKFLOW or INACTIVE_WORKFLOW status.",
-                "system_seed",
+                "Never fabricate API responses or container statuses. Always inspect live Docker/Uptime Kuma/HA telemetry before reporting.",
+                "v2_seed",
                 now,
             ),
             (
                 "auditor",
-                "Distinguish clearly between QUALITY_IMPROVEMENT_NEEDED (agent made a mistake) and MISSING_CAPABILITY (no active n8n workflow exists for the task).",
-                "system_seed",
+                "Verify zero hallucinations against tool output, zero stray communications, and that the user's question is completely answered.",
+                "v2_seed",
                 now,
             ),
         ]
@@ -300,6 +303,84 @@ def init_store() -> None:
             findings_json TEXT,
             summary TEXT,
             created_at TEXT NOT NULL
+        )
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pending_approvals (
+            approval_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            agent_name TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            arguments_json TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            created_at TEXT NOT NULL,
+            resolved_at TEXT
+        )
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS session_plans (
+            session_id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            steps_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tool_artifacts (
+            artifact_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            full_json TEXT NOT NULL,
+            row_count INTEGER DEFAULT 0,
+            summary TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS session_summaries (
+            session_id TEXT PRIMARY KEY,
+            summary TEXT NOT NULL,
+            compacted_up_to_id INTEGER DEFAULT 0,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS search_quota_usage (
+            provider TEXT NOT NULL,
+            month_key TEXT NOT NULL,
+            day_key TEXT NOT NULL,
+            credits_used INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (provider, day_key)
+        )
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS search_cache (
+            cache_key TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            query TEXT NOT NULL,
+            response_json TEXT NOT NULL,
+            expires_at REAL NOT NULL
         )
         """
     )
@@ -737,7 +818,7 @@ def get_system_summary() -> Dict[str, Any]:
         "token_stats": {
             "total_tokens_all_time": tot_row[0] if tot_row else 0,
             "avg_tokens_per_sec": round(tot_row[1], 1) if tot_row else 0.0,
-            "budget_per_task": 32000,
+            "budget_per_task": 64000,
             "throughput_target_tok_s": 500,
             "by_agent": by_agent,
         },
@@ -745,6 +826,7 @@ def get_system_summary() -> Dict[str, Any]:
         "recent_audits": recent_audits,
         "recent_feedback": recent_feedback,
         "missing_workflows_backlog": get_backlog_specs(),
+        "search_quota": get_search_quota_status(),
     }
 
 
@@ -1831,6 +1913,347 @@ def log_tax_audit_report(
     conn.commit()
     conn.close()
     return row_id
+
+
+# =============================================================================
+# v2.0 State Helpers: HITL Approvals, Todo Plans, Artifacts, Compaction & Search Quota
+# =============================================================================
+
+def create_pending_approval(
+    approval_id: str,
+    session_id: str,
+    task_id: str,
+    agent_name: str,
+    tool_name: str,
+    arguments: Dict[str, Any],
+    summary: str,
+) -> Dict[str, Any]:
+    init_store()
+    now = datetime.utcnow().isoformat() + "Z"
+    args_json = json.dumps(arguments or {})
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT OR REPLACE INTO pending_approvals
+        (approval_id, session_id, task_id, agent_name, tool_name, arguments_json, summary, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+        """,
+        (approval_id, session_id, task_id, agent_name, tool_name, args_json, summary, now),
+    )
+    conn.commit()
+    conn.close()
+    return {
+        "approval_id": approval_id,
+        "session_id": session_id,
+        "task_id": task_id,
+        "agent_name": agent_name,
+        "tool_name": tool_name,
+        "arguments": arguments or {},
+        "summary": summary,
+        "status": "PENDING",
+        "created_at": now,
+    }
+
+
+def get_pending_approval(approval_id: str) -> Optional[Dict[str, Any]]:
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT approval_id, session_id, task_id, agent_name, tool_name, arguments_json, summary, status, created_at, resolved_at
+        FROM pending_approvals WHERE approval_id = ?
+        """,
+        (approval_id,),
+    )
+    r = cur.fetchone()
+    conn.close()
+    if not r:
+        return None
+    return {
+        "approval_id": r[0],
+        "session_id": r[1],
+        "task_id": r[2],
+        "agent_name": r[3],
+        "tool_name": r[4],
+        "arguments": json.loads(r[5] or "{}"),
+        "summary": r[6],
+        "status": r[7],
+        "created_at": r[8],
+        "resolved_at": r[9],
+    }
+
+
+def resolve_pending_approval(approval_id: str, status: str) -> Optional[Dict[str, Any]]:
+    init_store()
+    now = datetime.utcnow().isoformat() + "Z"
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE pending_approvals SET status = ?, resolved_at = ? WHERE approval_id = ?",
+        (status, now, approval_id),
+    )
+    conn.commit()
+    conn.close()
+    return get_pending_approval(approval_id)
+
+
+def upsert_session_plan(session_id: str, task_id: str, steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    init_store()
+    now = datetime.utcnow().isoformat() + "Z"
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO session_plans (session_id, task_id, steps_json, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+            task_id = excluded.task_id,
+            steps_json = excluded.steps_json,
+            updated_at = excluded.updated_at
+        """,
+        (session_id, task_id, json.dumps(steps), now),
+    )
+    conn.commit()
+    conn.close()
+    return steps
+
+
+def get_session_plan(session_id: str) -> List[Dict[str, Any]]:
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT steps_json FROM session_plans WHERE session_id = ?", (session_id,))
+    r = cur.fetchone()
+    conn.close()
+    if not r:
+        return []
+    try:
+        return json.loads(r[0] or "[]")
+    except Exception:
+        return []
+
+
+def save_tool_artifact(
+    artifact_id: str,
+    session_id: str,
+    tool_name: str,
+    full_json: str,
+    row_count: int,
+    summary: str,
+) -> Dict[str, Any]:
+    init_store()
+    now = datetime.utcnow().isoformat() + "Z"
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT OR REPLACE INTO tool_artifacts
+        (artifact_id, session_id, tool_name, full_json, row_count, summary, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (artifact_id, session_id, tool_name, full_json, row_count, summary, now),
+    )
+    conn.commit()
+    conn.close()
+    return {"artifact_id": artifact_id, "tool_name": tool_name, "row_count": row_count, "summary": summary}
+
+
+def get_tool_artifact(artifact_id: str) -> Optional[Dict[str, Any]]:
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT artifact_id, session_id, tool_name, full_json, row_count, summary, created_at
+        FROM tool_artifacts WHERE artifact_id = ?
+        """,
+        (artifact_id,),
+    )
+    r = cur.fetchone()
+    conn.close()
+    if not r:
+        return None
+    return {
+        "artifact_id": r[0],
+        "session_id": r[1],
+        "tool_name": r[2],
+        "full_json": r[3],
+        "row_count": r[4],
+        "summary": r[5],
+        "created_at": r[6],
+    }
+
+
+def get_session_summary(session_id: str) -> Optional[Dict[str, Any]]:
+    init_store()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT summary, compacted_up_to_id, updated_at FROM session_summaries WHERE session_id = ?",
+        (session_id,),
+    )
+    r = cur.fetchone()
+    conn.close()
+    if not r:
+        return None
+    return {"summary": r[0], "compacted_up_to_id": r[1], "updated_at": r[2]}
+
+
+def upsert_session_summary(session_id: str, summary: str, compacted_up_to_id: int) -> None:
+    init_store()
+    now = datetime.utcnow().isoformat() + "Z"
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO session_summaries (session_id, summary, compacted_up_to_id, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+            summary = excluded.summary,
+            compacted_up_to_id = excluded.compacted_up_to_id,
+            updated_at = excluded.updated_at
+        """,
+        (session_id, summary, compacted_up_to_id, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def reserve_search_quota(
+    provider: str,
+    credits: int = 1,
+    monthly_limit: int = 900,
+    daily_limit: int = 35,
+) -> Dict[str, Any]:
+    """
+    Atomically reserves free-tier search quota in SQLite BEFORE any external API request.
+    Hard-blocks if daily or monthly free-tier safety cap would be exceeded.
+    """
+    init_store()
+    now_dt = datetime.utcnow()
+    month_key = now_dt.strftime("%Y-%m")
+    day_key = now_dt.strftime("%Y-%m-%d")
+    now = now_dt.isoformat() + "Z"
+
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COALESCE(SUM(credits_used), 0) FROM search_quota_usage WHERE provider = ? AND month_key = ?",
+            (provider, month_key),
+        )
+        month_used = int(cur.fetchone()[0] or 0)
+
+        cur.execute(
+            "SELECT COALESCE(credits_used, 0) FROM search_quota_usage WHERE provider = ? AND day_key = ?",
+            (provider, day_key),
+        )
+        row_day = cur.fetchone()
+        day_used = int(row_day[0] or 0) if row_day else 0
+
+        if month_used + credits > monthly_limit or day_used + credits > daily_limit:
+            conn.rollback()
+            return {
+                "allowed": False,
+                "provider": provider,
+                "month_used": month_used,
+                "monthly_limit": monthly_limit,
+                "day_used": day_used,
+                "daily_limit": daily_limit,
+                "reason": "free_tier_cap_reached",
+            }
+
+        cur.execute(
+            """
+            INSERT INTO search_quota_usage (provider, month_key, day_key, credits_used, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(provider, day_key) DO UPDATE SET
+                credits_used = search_quota_usage.credits_used + excluded.credits_used,
+                updated_at = excluded.updated_at
+            """,
+            (provider, month_key, day_key, credits, now),
+        )
+        conn.commit()
+        return {
+            "allowed": True,
+            "provider": provider,
+            "month_used": month_used + credits,
+            "monthly_limit": monthly_limit,
+            "day_used": day_used + credits,
+            "daily_limit": daily_limit,
+        }
+    finally:
+        conn.close()
+
+
+def get_search_quota_status(monthly_limit: int = 900, daily_limit: int = 35) -> Dict[str, Any]:
+    init_store()
+    now_dt = datetime.utcnow()
+    month_key = now_dt.strftime("%Y-%m")
+    day_key = now_dt.strftime("%Y-%m-%d")
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    out: Dict[str, Any] = {}
+    for provider in ("tavily", "brave"):
+        cur.execute(
+            "SELECT COALESCE(SUM(credits_used), 0) FROM search_quota_usage WHERE provider = ? AND month_key = ?",
+            (provider, month_key),
+        )
+        m_used = int(cur.fetchone()[0] or 0)
+        cur.execute(
+            "SELECT COALESCE(credits_used, 0) FROM search_quota_usage WHERE provider = ? AND day_key = ?",
+            (provider, day_key),
+        )
+        r_d = cur.fetchone()
+        d_used = int(r_d[0] or 0) if r_d else 0
+        out[provider] = {
+            "month_used": m_used,
+            "monthly_limit": monthly_limit,
+            "day_used": d_used,
+            "daily_limit": daily_limit,
+            "remaining_today": max(0, daily_limit - d_used),
+            "remaining_month": max(0, monthly_limit - m_used),
+        }
+    conn.close()
+    return out
+
+
+def get_cached_search(cache_key: str) -> Optional[Dict[str, Any]]:
+    init_store()
+    import time as _t
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT response_json, expires_at FROM search_cache WHERE cache_key = ?",
+        (cache_key,),
+    )
+    r = cur.fetchone()
+    conn.close()
+    if not r or float(r[1]) < _t.time():
+        return None
+    try:
+        return json.loads(r[0])
+    except Exception:
+        return None
+
+
+def set_cached_search(cache_key: str, provider: str, query: str, response_data: Dict[str, Any], ttl_seconds: int = 900) -> None:
+    init_store()
+    import time as _t
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT OR REPLACE INTO search_cache (cache_key, provider, query, response_json, expires_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (cache_key, provider, query, json.dumps(response_data), _t.time() + ttl_seconds),
+    )
+    conn.commit()
+    conn.close()
 
 
 

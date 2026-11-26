@@ -21,7 +21,11 @@ import {
   Plus,
   RefreshCw,
   ClipboardList,
-  ArrowDown
+  ArrowDown,
+  Paperclip,
+  X,
+  ExternalLink,
+  ShieldAlert
 } from 'lucide-react';
 
 const SUGGESTED_PROMPTS = [
@@ -291,6 +295,10 @@ export default function ManagerChat({ onBackToCheckIn }) {
   const [sessions, setSessions] = useState([]);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(null);
+  const [activePlan, setActivePlan] = useState([]);
+  const [attachments, setAttachments] = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [resolvingApprovalId, setResolvingApprovalId] = useState(null);
   const [newLessonAgent, setNewLessonAgent] = useState('manager');
   const [newLessonRule, setNewLessonRule] = useState('');
   const [abortController, setAbortController] = useState(null);
@@ -303,6 +311,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
   const messagesEndRef = useRef(null);
   const messagesScrollRef = useRef(null);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const scrollToBottom = (smooth = false) => {
     const el = messagesScrollRef.current;
@@ -500,23 +509,34 @@ export default function ManagerChat({ onBackToCheckIn }) {
       }
     }
 
+    const currentAttachments = [...attachments];
     setInput('');
+    setAttachments([]);
+    setActivePlan([]);
     const userMsgId = 'user_' + Date.now();
     const assistantMsgId = 'mgr_' + Date.now();
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+    const displayUserText =
+      currentAttachments.length > 0
+        ? `${text}\n\n📎 *Attached: ${currentAttachments.map((a) => a.filename).join(', ')}*`
+        : text;
+
     const updated = [
       ...messages,
-      { id: userMsgId, role: 'user', content: text, timestamp: timeStr },
+      { id: userMsgId, role: 'user', content: displayUserText, timestamp: timeStr },
       {
         id: assistantMsgId,
         role: 'assistant',
         content: '',
+        thinkingText: '',
         timestamp: timeStr,
         isThinking: true,
         trace: [],
+        citations: [],
+        approval: null,
         tokensUsed: 0,
-        tokenBudget: 2000,
+        tokenBudget: 64000,
         specCreated: null
       }
     ];
@@ -539,7 +559,8 @@ export default function ManagerChat({ onBackToCheckIn }) {
         body: JSON.stringify({
           chatInput: text,
           sessionId: sessionId,
-          tokenBudget: 64000
+          tokenBudget: 64000,
+          attachments: currentAttachments
         }),
         signal: controller.signal
       });
@@ -552,6 +573,7 @@ export default function ManagerChat({ onBackToCheckIn }) {
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
       let accumulatedText = '';
+      let accumulatedThinking = '';
       let currentTraces = [];
 
       const processStreamLine = (rawLine) => {
@@ -565,6 +587,36 @@ export default function ManagerChat({ onBackToCheckIn }) {
               phase: event.phase,
               message: event.message
             });
+          } else if (event.type === 'token_delta' && typeof event.delta === 'string') {
+            accumulatedText += event.delta;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? { ...m, content: accumulatedText, isThinking: false }
+                  : m
+              )
+            );
+          } else if (event.type === 'thinking_delta' && typeof event.delta === 'string') {
+            accumulatedThinking += event.delta;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId ? { ...m, thinkingText: accumulatedThinking } : m
+              )
+            );
+          } else if (event.type === 'plan_update' && Array.isArray(event.plan)) {
+            setActivePlan(event.plan);
+          } else if (event.type === 'approval_required' && event.approval) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId ? { ...m, approval: event.approval, isThinking: false } : m
+              )
+            );
+          } else if (event.type === 'citations' && Array.isArray(event.citations)) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId ? { ...m, citations: event.citations } : m
+              )
+            );
           } else if (event.type === 'agent_trace' && event.trace) {
             currentTraces = [...currentTraces, event.trace];
             setMessages((prev) =>
@@ -573,13 +625,18 @@ export default function ManagerChat({ onBackToCheckIn }) {
               )
             );
           } else if (event.type === 'item' && typeof event.content === 'string') {
-            accumulatedText += event.content;
+            accumulatedText = event.content;
             // Auto-collapse workflow trace so the final answer is immediately visible
             setExpandedTraces((prev) => ({ ...prev, [assistantMsgId]: false }));
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
-                  ? { ...m, content: accumulatedText, isThinking: false }
+                  ? {
+                      ...m,
+                      content: accumulatedText,
+                      citations: event.citations || m.citations || [],
+                      isThinking: false
+                    }
                   : m
               )
             );
@@ -591,6 +648,8 @@ export default function ManagerChat({ onBackToCheckIn }) {
                   ? {
                       ...m,
                       trace: event.trace || event.trace_steps || currentTraces,
+                      citations: event.citations || m.citations || [],
+                      approval: event.approval || m.approval || null,
                       tokensUsed: event.tokens_used || 0,
                       tokenBudget: event.token_budget || 64000,
                       specCreated: event.spec_created || null,
@@ -680,6 +739,58 @@ export default function ManagerChat({ onBackToCheckIn }) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  };
+
+  const handleFileUpload = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    setIsUploading(true);
+    try {
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await fetch(`${getApiBase()}/upload`, { method: 'POST', body: fd });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ok) {
+            setAttachments((prev) => [...prev, data]);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Upload failed:', e);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleApprovalDecision = async (msgId, approvalId, decision) => {
+    setResolvingApprovalId(approvalId);
+    try {
+      const res = await fetch(`${getApiBase()}/chat/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approvalId, decision })
+      });
+      const data = await res.json();
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId
+            ? {
+                ...m,
+                approval: { ...m.approval, status: decision === 'approve' ? 'APPROVED' : 'REJECTED' },
+                content: data.content || m.content
+              }
+            : m
+        )
+      );
+      fetchDashboard();
+    } catch (e) {
+      console.error('Approval action failed:', e);
+    } finally {
+      setResolvingApprovalId(null);
     }
   };
 
@@ -1259,6 +1370,59 @@ export default function ManagerChat({ onBackToCheckIn }) {
                     <div>{renderMarkdown(m.content)}</div>
                   )}
 
+                  {!isUser && m.approval && (
+                    <div className="mt-3 p-3 rounded-xl border border-amber-300 dark:border-amber-700/70 bg-amber-50/90 dark:bg-amber-950/30 text-xs">
+                      <div className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300 mb-1">
+                        <ShieldAlert className="w-4 h-4 flex-shrink-0" />
+                        <span>Action Approval Required ({m.approval.tool_name})</span>
+                      </div>
+                      <p className="text-neutral-700 dark:text-neutral-200 mb-2">{m.approval.summary}</p>
+                      {m.approval.status === 'PENDING' ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={resolvingApprovalId === m.approval.approval_id}
+                            onClick={() => handleApprovalDecision(m.id, m.approval.approval_id, 'approve')}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition-colors disabled:opacity-50"
+                          >
+                            Approve &amp; Execute
+                          </button>
+                          <button
+                            type="button"
+                            disabled={resolvingApprovalId === m.approval.approval_id}
+                            onClick={() => handleApprovalDecision(m.id, m.approval.approval_id, 'reject')}
+                            className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold text-xs transition-colors disabled:opacity-50"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="inline-block px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
+                          Status: {m.approval.status}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {!isUser && Array.isArray(m.citations) && m.citations.length > 0 && (
+                    <div className="mt-3 pt-2 border-t border-neutral-200 dark:border-neutral-700/70 flex flex-wrap gap-1.5">
+                      {m.citations.map((c, ci) => (
+                        <a
+                          key={ci}
+                          href={c.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-white/80 dark:bg-charcoal-dark/80 border border-neutral-200 dark:border-neutral-700 text-indigo-700 dark:text-indigo-300 hover:border-indigo-400 transition-colors max-w-[220px] truncate"
+                          title={c.title || c.url}
+                        >
+                          <span className="font-mono text-neutral-400">[{c.index || ci + 1}]</span>
+                          <span className="truncate">{c.title || c.url}</span>
+                          <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
+                        </a>
+                      ))}
+                    </div>
+                  )}
+
                   {!isUser && m.failedPrompt && !isStreaming && (
                     <div className="mt-2.5 flex items-center gap-2">
                       <button
@@ -1319,6 +1483,48 @@ export default function ManagerChat({ onBackToCheckIn }) {
 
       {/* Input Form Bar */}
       <div className="p-3 sm:p-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-charcoal/50">
+        {activePlan.length > 0 && (
+          <div className="mb-2 px-3 py-2 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60 flex flex-wrap items-center gap-2 text-[11px]">
+            <span className="font-bold text-indigo-700 dark:text-indigo-300">Plan:</span>
+            {activePlan.map((st, idx) => (
+              <span
+                key={st.id || idx}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium ${
+                  st.status === 'completed'
+                    ? 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300'
+                    : st.status === 'in_progress'
+                    ? 'bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300'
+                    : 'bg-white dark:bg-charcoal text-neutral-600 dark:text-neutral-300'
+                }`}
+              >
+                {st.label}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {attachments.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {attachments.map((att) => (
+              <span
+                key={att.file_id}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-xs text-indigo-800 dark:text-indigo-200"
+              >
+                <Paperclip className="w-3 h-3" />
+                <span className="max-w-[160px] truncate">{att.filename}</span>
+                <button
+                  type="button"
+                  onClick={() => setAttachments((prev) => prev.filter((a) => a.file_id !== att.file_id))}
+                  className="hover:text-red-500"
+                  title="Remove attachment"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -1327,6 +1533,23 @@ export default function ManagerChat({ onBackToCheckIn }) {
           }}
           className="relative flex items-end gap-2"
         >
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.txt,.md"
+            className="hidden"
+            onChange={(e) => handleFileUpload(e.target.files)}
+          />
+          <button
+            type="button"
+            disabled={isUploading || isStreaming}
+            onClick={() => fileInputRef.current?.click()}
+            className="h-11 px-3 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-charcoal text-neutral-600 dark:text-neutral-300 hover:border-indigo-500 flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-50"
+            title="Attach PDF, receipt image, CSV, or text file"
+          >
+            <Paperclip className={`w-4 h-4 ${isUploading ? 'animate-pulse text-indigo-500' : ''}`} />
+          </button>
           <div className="relative flex-1">
             <textarea
               ref={inputRef}

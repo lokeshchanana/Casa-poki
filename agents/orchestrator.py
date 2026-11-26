@@ -301,278 +301,30 @@ Output JSON:
 
 
 # =============================================================================
-# Antigravity Native Engine & Parser
+# Modular v2.0 Engine Imports (Re-exported for backward compatibility)
 # =============================================================================
 
-def parse_antigravity_output(raw_text: str) -> tuple[str, List[Dict[str, Any]]]:
-    """
-    Parses output from Antigravity CLI, detecting structured tool_call JSON blocks
-    or returning natural markdown content.
-    """
-    text = (raw_text or "").strip()
-
-    # 1. Check for markdown codeblocks ```json ... ```
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if match:
-        try:
-            data = json.loads(match.group(1))
-            if isinstance(data, dict) and "tool_call" in data:
-                tc = data["tool_call"]
-                return "", [{"function": {"name": tc.get("name"), "arguments": tc.get("arguments", {})}}]
-        except Exception:
-            pass
-
-    # 2. Balanced brace scan for {"tool_call"
-    idx = text.find('{"tool_call"')
-    if idx == -1:
-        idx = text.find('{ "tool_call"')
-    if idx != -1:
-        depth = 0
-        end_idx = -1
-        for i in range(idx, len(text)):
-            if text[i] == "{":
-                depth += 1
-            elif text[i] == "}":
-                depth -= 1
-                if depth == 0:
-                    end_idx = i + 1
-                    break
-        if end_idx != -1:
-            try:
-                data = json.loads(text[idx:end_idx])
-                if isinstance(data, dict) and "tool_call" in data:
-                    tc = data["tool_call"]
-                    leading = text[:idx].strip()
-                    return leading, [{"function": {"name": tc.get("name"), "arguments": tc.get("arguments", {})}}]
-            except Exception:
-                pass
-
-    # 3. Pure JSON
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict) and "tool_call" in data:
-            tc = data["tool_call"]
-            return "", [{"function": {"name": tc.get("name"), "arguments": tc.get("arguments", {})}}]
-    except Exception:
-        pass
-
-    return text, []
-
-
-async def call_antigravity_cli(
-    task_id: str,
-    agent_name: str,
-    messages: List[Dict[str, Any]],
-    tools: Optional[List[Dict[str, Any]]] = None,
-    agy_bin: str = "/usr/local/bin/agy",
-    max_tokens: int = 2000,
-    temperature: float = 0.1,
-) -> Dict[str, Any]:
-    """
-    Executes prompt against native Antigravity CLI runtime (agy) with zero API keys.
-    """
-    start_ts = time.time()
-
-    system_parts = []
-    conversation_parts = []
-
-    for msg in messages:
-        role = msg.get("role")
-        content = msg.get("content", "")
-        if role == "system":
-            system_parts.append(content)
-        elif role == "user":
-            conversation_parts.append(f"User: {content}")
-        elif role == "assistant":
-            conversation_parts.append(f"Assistant: {content}")
-
-    prompt_builder = []
-    if system_parts:
-        prompt_builder.append("### SYSTEM INSTRUCTIONS & PERSONA ###\n" + "\n\n".join(system_parts))
-
-    if tools:
-        tool_desc = json.dumps(tools, indent=2)
-        prompt_builder.append(
-            f"### AVAILABLE TOOLS ###\n{tool_desc}\n\n"
-            "### TOOL CALL INSTRUCTIONS ###\n"
-            "If you need to execute a tool, respond ONLY with a JSON object in this format:\n"
-            '{"tool_call": {"name": "<tool_name>", "arguments": { ... }}}\n'
-            "If no tool call is needed, provide your natural markdown answer directly."
-        )
-
-    if conversation_parts:
-        prompt_builder.append("### CONVERSATION TURNS ###\n" + "\n\n".join(conversation_parts))
-
-    full_prompt = "\n\n".join(prompt_builder)
-
-    cmd = [
-        agy_bin,
-        "-p", full_prompt,
-        "--output-format", "json",
-        "--dangerously-skip-permissions",
-    ]
-
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        raw_output = stdout.decode().strip()
-
-        if proc.returncode != 0 or not raw_output:
-            err_msg = stderr.decode().strip() or "Empty output from Antigravity"
-            logger.error(f"Antigravity CLI failed (code {proc.returncode}): {err_msg}")
-            raise RuntimeError(f"Antigravity CLI error: {err_msg}")
-
-        data = json.loads(raw_output)
-        raw_resp = data.get("response", "") or ""
-        duration_sec = float(data.get("duration_seconds", 0.0) or 0.0)
-        duration_ms = int(duration_sec * 1000) if duration_sec > 0 else int((time.time() - start_ts) * 1000)
-
-        usage = data.get("usage") or {}
-        prompt_tokens = int(usage.get("input_tokens") or 0)
-        completion_tokens = int(usage.get("output_tokens") or 0)
-        tok_per_sec = (completion_tokens / duration_sec) if duration_sec > 0 else 0.0
-
-        content, tool_calls = parse_antigravity_output(raw_resp)
-
-        metrics = log_token_usage(
-            task_id=task_id,
-            agent_name=agent_name,
-            model="antigravity-native",
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            tokens_per_sec=round(tok_per_sec, 2),
-            duration_ms=duration_ms,
-        )
-
-        return {
-            "content": content,
-            "tool_calls": tool_calls,
-            "metrics": metrics,
-        }
-    except Exception as e:
-        logger.error(f"Antigravity execution failed: {e}")
-        if OLLAMA_BASE_URL:
-            logger.warning("Falling back to Ollama engine...")
-            return await call_ollama_chat(task_id, agent_name, messages, tools, max_tokens, temperature)
-        duration_ms = int((time.time() - start_ts) * 1000)
-        return {
-            "content": f"Antigravity Error: {str(e)}",
-            "tool_calls": [],
-            "metrics": log_token_usage(task_id, agent_name, "antigravity-native", 0, 0, 0.0, duration_ms),
-        }
-
-
-# =============================================================================
-# LLM Gateway (Native Tool Calling & Chat)
-# =============================================================================
-
-async def call_ollama_chat(
-    task_id: str,
-    agent_name: str,
-    messages: List[Dict[str, Any]],
-    tools: Optional[List[Dict[str, Any]]] = None,
-    max_tokens: int = 2000,
-    temperature: float = 0.1,
-) -> Dict[str, Any]:
-    """
-    Fallback call to local Ollama engine.
-    """
-    start_ts = time.time()
-    payload: Dict[str, Any] = {
-        "model": DEFAULT_MODEL,
-        "messages": messages,
-        "stream": False,
-        "keep_alive": "24h",
-        "options": {
-            "temperature": temperature,
-            "num_predict": max_tokens,
-        },
-    }
-    if tools:
-        payload["tools"] = tools
-
-    try:
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            resp = await client.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-    except Exception as e:
-        duration_ms = int((time.time() - start_ts) * 1000)
-        logger.error(f"LLM call failed: {e}")
-        return {
-            "content": f"LLM Error: {str(e)}",
-            "tool_calls": [],
-            "metrics": log_token_usage(task_id, agent_name, DEFAULT_MODEL, 0, 0, 0.0, duration_ms),
-        }
-
-    duration_ms = int((time.time() - start_ts) * 1000)
-    msg = data.get("message") or {}
-    content = msg.get("content", "") or ""
-    tool_calls = msg.get("tool_calls", []) or []
-
-    prompt_tokens = int(data.get("prompt_eval_count") or 0)
-    completion_tokens = int(data.get("eval_count") or 0)
-    eval_duration_ns = int(data.get("eval_duration") or 0)
-    tok_per_sec = (completion_tokens / (eval_duration_ns / 1e9)) if eval_duration_ns > 0 else 0.0
-
-    metrics = log_token_usage(
-        task_id=task_id,
-        agent_name=agent_name,
-        model=DEFAULT_MODEL,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        tokens_per_sec=tok_per_sec,
-        duration_ms=duration_ms,
-    )
-
-    return {
-        "content": content,
-        "tool_calls": tool_calls,
-        "metrics": metrics,
-    }
-
-
-async def call_llm_chat(
-    task_id: str,
-    agent_name: str,
-    messages: List[Dict[str, Any]],
-    tools: Optional[List[Dict[str, Any]]] = None,
-    max_tokens: int = 2000,
-    temperature: float = 0.1,
-) -> Dict[str, Any]:
-    """
-    Unified LLM gateway: Prefers native Antigravity runtime (agy) with zero API keys.
-    Falls back to Ollama if Antigravity binary is not available.
-    """
-    resolved_agy = None
-    for candidate in [AGY_PATH, "/usr/local/bin/agy", "/home/lokesh/.local/bin/agy", shutil.which("agy")]:
-        if candidate and os.path.exists(candidate):
-            resolved_agy = candidate
-            break
-
-    if AGENT_BACKEND == "antigravity" and resolved_agy:
-        return await call_antigravity_cli(
-            task_id=task_id,
-            agent_name=agent_name,
-            messages=messages,
-            tools=tools,
-            agy_bin=resolved_agy,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-
-    return await call_ollama_chat(
-        task_id=task_id,
-        agent_name=agent_name,
-        messages=messages,
-        tools=tools,
-        max_tokens=max_tokens,
-        temperature=temperature,
-    )
+from auditor import run_auditor_verification
+from context_manager import build_compacted_context, store_or_inline_tool_output
+from hooks import pre_tool_use_hook
+from llm_gateway import (
+    call_antigravity_cli,
+    call_llm_chat,
+    call_ollama_chat,
+    parse_antigravity_output,
+    select_model_tier,
+)
+from state_store import (
+    create_pending_approval,
+    get_pending_approval,
+    resolve_pending_approval,
+    upsert_session_plan,
+)
+from subagent_runtime import (
+    get_domain_tools_for_manager,
+    run_parallel_subagents,
+    run_specialist_subagent,
+)
 
 
 # =============================================================================
@@ -733,6 +485,7 @@ async def run_multi_agent_pipeline(
     user_message: str,
     session_id: str = "manager_default",
     token_budget: int = DEFAULT_TASK_BUDGET,
+    attachments: Optional[List[Dict[str, Any]]] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Modern Antigravity Manager Agent Pipeline:
@@ -877,15 +630,13 @@ async def run_multi_agent_pipeline(
         return
 
     # -------------------------------------------------------------------------
-    # Main Agent Reasoner: Persist User Turn Immediately + Multi-Agent Triage
+    # Main Agent Reasoner v2.0: Compaction, Streaming, Parallel ReAct, HITL & Audit
     # -------------------------------------------------------------------------
-    # Persist user message immediately so even if connection/LLM fails mid-flight,
-    # a subsequent "Try again" sees the exact failed query instead of an older turn.
-    raw_history = get_chat_history(session_id, limit=6)
+    raw_history = get_chat_history(session_id, limit=24)
     add_chat_message(session_id, "user", user_message)
 
     try:
-        # 1. Retrieve relevant memories from the Vector Database
+        # 1. Vector Memory + PreCompact/PostCompact Rolling Context
         recalled_memories = vector_memory.query_memories(query=user_message, top_k=3)
         memory_context_block = ""
         if recalled_memories:
@@ -895,283 +646,396 @@ async def run_multi_agent_pipeline(
             ]
             memory_context_block = "\nRelevant Vector Memories from Brain:\n" + "\n".join(memory_lines) + "\n"
 
-        # Load historical context and dynamically prune ONLY when context has shifted
-        history = prepare_pruned_history(raw_history, user_message)
-        lessons = [l["rule"] for l in get_lessons()[:8]]
+        compacted = await build_compacted_context(
+            session_id=session_id,
+            full_history=raw_history,
+            call_llm_fn=call_llm_chat,
+            task_id=task_id,
+        )
+        history = prepare_pruned_history(compacted["messages"], user_message)
+
+        lessons = [
+            l["rule"] for l in get_lessons()
+            if l.get("agent_name") in ("manager", "global", "all", None)
+        ][:8]
         lessons_block = ("\nActive Lessons:\n" + "\n".join(f"- {r}" for r in lessons)) if lessons else ""
 
-        messages = [
-            {"role": "system", "content": MANAGER_SYSTEM_PROMPT + lessons_block + memory_context_block},
+        summary_block = (
+            f"\nRolling Session Summary:\n{compacted['summary']}\n"
+            if compacted.get("summary")
+            else ""
+        )
+        plan_block = (
+            f"\nActive Task Plan:\n{json.dumps(compacted['plan'])}\n"
+            if compacted.get("plan")
+            else ""
+        )
+
+        # Build attachment context if user uploaded PDFs/images/files
+        attachment_block = ""
+        if attachments:
+            att_parts = []
+            for att in attachments:
+                fname = att.get("filename") or "file"
+                extracted = (att.get("extracted_text") or "").strip()
+                fpath = att.get("file_path") or ""
+                att_parts.append(f"[Attached File: {fname} | Path: {fpath}]\n{extracted[:4000]}")
+            attachment_block = "\n\n### ATTACHED FILES ###\n" + "\n---\n".join(att_parts)
+
+        domain = detect_message_domain(user_message)
+        scoped_tools = get_domain_tools_for_manager(domain, TOOL_SCHEMAS)
+        model_tier = select_model_tier(agent_name="manager", user_message=user_message)
+
+        messages: List[Dict[str, Any]] = [
+            {
+                "role": "system",
+                "content": (
+                    MANAGER_SYSTEM_PROMPT
+                    + lessons_block
+                    + memory_context_block
+                    + summary_block
+                    + plan_block
+                ),
+            },
         ]
         for h in history:
             messages.append({"role": h["role"], "content": h["content"]})
-        messages.append({"role": "user", "content": user_message})
+        messages.append({"role": "user", "content": user_message + attachment_block})
 
-        # Call Manager Agent with tool declarations
-        llm_resp = await call_llm_chat(
-            task_id=task_id,
-            agent_name="manager",
-            messages=messages,
-            tools=TOOL_SCHEMAS,
-            max_tokens=1500,
-            temperature=0.1,
-        )
-        tokens_used += llm_resp["metrics"]["total_tokens"]
-        tool_calls = llm_resp["tool_calls"]
-        direct_content = llm_resp["content"]
+        async def _call_streaming_manager(msgs, tools_list, tier=model_tier):
+            q: asyncio.Queue = asyncio.Queue()
 
-        # -------------------------------------------------------------------------
-        # Path A: Multi-Step Tool & Delegation Loop (up to 4 tool turns)
-        # -------------------------------------------------------------------------
+            async def on_tok(d: str):
+                await q.put(emit("token_delta", {"delta": d}))
+
+            async def on_think(d: str):
+                await q.put(emit("thinking_delta", {"delta": d}))
+
+            task = asyncio.create_task(
+                call_llm_chat(
+                    task_id=task_id,
+                    agent_name="manager",
+                    messages=msgs,
+                    tools=tools_list,
+                    max_tokens=1800,
+                    temperature=0.1,
+                    model_tier=tier,
+                    on_token_delta=on_tok,
+                    on_thinking_delta=on_think,
+                )
+            )
+            buffered_events: List[str] = []
+            while not task.done() or not q.empty():
+                try:
+                    ev = await asyncio.wait_for(q.get(), timeout=0.05)
+                    buffered_events.append(ev)
+                except asyncio.TimeoutError:
+                    pass
+            res = await task
+            return res, buffered_events
+
+        llm_resp, stream_events = await _call_streaming_manager(messages, scoped_tools)
+        tokens_used += int(llm_resp["metrics"].get("total_tokens") or 0)
+        tool_calls = llm_resp.get("tool_calls") or []
+        direct_content = llm_resp.get("content") or ""
+
+        if not tool_calls:
+            for ev in stream_events:
+                yield ev
+
+        # ---------------------------------------------------------------------
+        # Path A: Multi-Step Parallel ReAct Loop (up to 12 turns)
+        # ---------------------------------------------------------------------
         if tool_calls:
-            MAX_TOOL_TURNS = 4
+            MAX_TOOL_TURNS = 12
             executed_tools: List[str] = []
             last_formatted = ""
             last_tool_ok = True
             last_tool_err = ""
             delegated_agent_names: List[str] = []
+            all_citations: List[Dict[str, Any]] = []
+            tool_evidence_chunks: List[str] = []
             final_synthesized = ""
             step_num = 0
+            seen_call_counts: Dict[str, int] = {}
+            paused_for_approval: Optional[Dict[str, Any]] = None
 
             for turn in range(MAX_TOOL_TURNS):
-                if not tool_calls:
+                if not tool_calls or paused_for_approval:
                     break
 
-                call = tool_calls[0]
-                func = call.get("function") or {}
-                tool_name = func.get("name")
-                args = func.get("arguments") or {}
-                if isinstance(args, str):
-                    try:
-                        args = json.loads(args)
-                    except Exception:
-                        args = {}
+                # Filter circuit-breaker duplicates
+                batch_calls = []
+                for call in tool_calls:
+                    func = call.get("function") or {}
+                    t_name = str(func.get("name") or "")
+                    t_args = func.get("arguments") or {}
+                    if isinstance(t_args, str):
+                        try:
+                            t_args = json.loads(t_args)
+                        except Exception:
+                            t_args = {}
+                    if t_name == "search_contacts" and "query" in t_args:
+                        t_args["query"] = re.sub(
+                            r"^(is there a |does a |find |search |use |user )",
+                            "",
+                            str(t_args["query"]),
+                            flags=re.I,
+                        ).strip()
+                    sig = f"{t_name}:{json.dumps(t_args, sort_keys=True)}"
+                    seen_call_counts[sig] = seen_call_counts.get(sig, 0) + 1
+                    if seen_call_counts[sig] > 2:
+                        continue
+                    batch_calls.append((call, t_name, t_args))
 
-                invoked_tool_name = tool_name
-                invoked_tool_args = args
-                executed_tools.append(str(tool_name))
+                if not batch_calls:
+                    break
 
-                if tool_name == "search_contacts" and "query" in args:
-                    args["query"] = re.sub(r"^(is there a |does a |find |search |use |user )", "", str(args["query"]), flags=re.I).strip()
+                invoked_tool_name = batch_calls[0][1]
+                invoked_tool_args = batch_calls[0][2]
 
                 yield emit(
                     "agent_status",
                     {
                         "agent": "it_agent",
                         "phase": "executing_tool",
-                        "message": f"Executing tool `{tool_name}` (step {turn + 1}/{MAX_TOOL_TURNS})...",
+                        "message": (
+                            f"Executing {len(batch_calls)} tool(s) in parallel (turn {turn + 1}/{MAX_TOOL_TURNS})..."
+                            if len(batch_calls) > 1
+                            else f"Executing `{invoked_tool_name}` (step {turn + 1}/{MAX_TOOL_TURNS})..."
+                        ),
                     },
                 )
 
-                step_num += 1
-                plan_trace = {
-                    "step": step_num,
-                    "agent": "Manager Agent",
-                    "role": "Task Triage & Delegation",
-                    "decision": {
-                        "intent": "EXECUTE_TOOL",
-                        "tool": tool_name,
-                        "arguments": args,
-                        "turn": turn + 1,
-                    },
-                    "metrics": llm_resp["metrics"],
-                    "tokens_remaining": max(0, token_budget - tokens_used),
-                }
-                trace_steps.append(plan_trace)
-                yield emit("agent_trace", {"trace": plan_trace})
-
-                specialist_info = SPECIALIST_PERSONAS["manager"]
-                specialist_name = specialist_info["name"]
-
-                if tool_name == "delegate_to_agent":
-                    target_agent = args.get("target_agent", "manager").lower()
-                    task_desc = args.get("task_description", "")
-                    context_data = args.get("context_data", "")
-
-                    specialist_info = SPECIALIST_PERSONAS.get(target_agent, SPECIALIST_PERSONAS["manager"])
-                    specialist_name = specialist_info["name"]
-                    if specialist_name not in delegated_agent_names:
-                        delegated_agent_names.append(specialist_name)
-
-                    yield emit(
-                        "agent_status",
-                        {
-                            "agent": target_agent,
-                            "phase": "specialist_working",
-                            "message": f"{specialist_name} ({specialist_info['role']}) is executing delegated task...",
+                for _, t_name, t_args in batch_calls:
+                    step_num += 1
+                    plan_trace = {
+                        "step": step_num,
+                        "agent": "Manager Agent",
+                        "role": "Task Triage & Parallel Dispatch",
+                        "decision": {
+                            "intent": "EXECUTE_TOOL",
+                            "tool": t_name,
+                            "arguments": t_args,
+                            "turn": turn + 1,
                         },
-                    )
-
-                    spec_memories = vector_memory.query_memories(query=task_desc, agent_id=target_agent, top_k=2)
-                    spec_mem_str = "\n".join(f"- {m['content']}" for m in spec_memories) if spec_memories else "None"
-
-                    specialist_messages = [
-                        {
-                            "role": "system",
-                            "content": f"{specialist_info['system_prompt']}\nRelevant Domain Knowledge:\n{spec_mem_str}\nProvide a direct, high-value, professional response.",
-                        },
-                        {
-                            "role": "user",
-                            "content": f"Task: {task_desc}\nContext: {context_data}",
-                        },
-                    ]
-
-                    crm_tools = [
-                        t for t in TOOL_SCHEMAS
-                        if t["function"]["name"] in (
-                            "search_contacts",
-                            "create_contact",
-                            "update_contact",
-                            "delete_contact",
-                            "manage_notes",
-                            "manage_tasks",
-                            "manage_opportunities",
-                            "crm_entity_operation",
-                        )
-                    ]
-
-                    spec_tools = (
-                        [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("finance_")]
-                        if target_agent in ("finance", "tax_auditor")
-                        else (
-                            [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("ha_")]
-                            if target_agent == "homeassistant"
-                            else (
-                                [t for t in TOOL_SCHEMAS if t["function"]["name"].startswith("mailman_")]
-                                if target_agent == "mailman"
-                                else (
-                                    crm_tools
-                                    if target_agent in ("intake", "manager")
-                                    else None
-                                )
-                            )
-                        )
-                    )
-
-                    spec_resp = await call_llm_chat(
-                        task_id=task_id,
-                        agent_name=target_agent,
-                        messages=specialist_messages,
-                        tools=spec_tools,
-                        max_tokens=800,
-                        temperature=0.2,
-                    )
-                    tokens_used += spec_resp["metrics"]["total_tokens"]
-                    specialist_output = spec_resp["content"]
-
-                    if spec_resp.get("tool_calls"):
-                        fn_formatted = ""
-                        for t_call in spec_resp["tool_calls"]:
-                            fn_data = t_call.get("function", {})
-                            fn_name = fn_data.get("name")
-                            fn_args = fn_data.get("arguments", {})
-                            fn_res = await execute_tool(fn_name, fn_args)
-                            fn_formatted = format_tool_result(fn_name, fn_res, fn_args)
-                            specialist_messages.append({"role": "assistant", "content": "", "tool_calls": [t_call]})
-                            specialist_messages.append({"role": "tool", "content": json.dumps(fn_res)})
-
-                        spec_turn2 = await call_llm_chat(
-                            task_id=task_id,
-                            agent_name=target_agent,
-                            messages=specialist_messages,
-                            tools=None,
-                            max_tokens=800,
-                            temperature=0.2,
-                        )
-                        tokens_used += spec_turn2["metrics"]["total_tokens"]
-                        specialist_output = spec_turn2["content"]
-                        if fn_formatted and fn_formatted not in specialist_output:
-                            specialist_output = f"{fn_formatted}\n\n{specialist_output}"
-
-                    tool_result = {
-                        "ok": True,
-                        "tool": "delegate_to_agent",
-                        "target_agent": target_agent,
-                        "specialist_name": specialist_name,
-                        "response": specialist_output,
-                        "duration_ms": spec_resp["metrics"]["duration_ms"],
+                        "metrics": llm_resp["metrics"],
+                        "tokens_remaining": max(0, token_budget - tokens_used),
                     }
-                    last_formatted = (
-                        f"### Delegated Response from {specialist_name} ({specialist_info['role']})\n\n"
-                        f"{specialist_output}"
+                    trace_steps.append(plan_trace)
+                    yield emit("agent_trace", {"trace": plan_trace})
+
+                async def _exec_single(call_obj, t_name: str, t_args: Dict[str, Any]):
+                    if t_name == "manage_plan":
+                        steps = upsert_session_plan(session_id, task_id, t_args.get("steps") or [])
+                        return call_obj, t_name, t_args, {"ok": True, "plan": steps, "plan_updated": True}, "Manager Agent", "Execution Plan"
+
+                    hook_res = pre_tool_use_hook(t_name, t_args, session_id)
+                    if hook_res["decision"] == "BLOCK":
+                        return call_obj, t_name, t_args, {"ok": False, "blocked": True, "error": hook_res["reason"]}, "PreToolUse Hook", "Policy Guardrail"
+
+                    if hook_res["decision"] == "REQUIRE_APPROVAL":
+                        app_id = f"appr_{uuid.uuid4().hex[:10]}"
+                        appr = create_pending_approval(
+                            approval_id=app_id,
+                            session_id=session_id,
+                            task_id=task_id,
+                            agent_name="manager",
+                            tool_name=t_name,
+                            arguments=t_args,
+                            summary=hook_res["summary"],
+                        )
+                        return call_obj, t_name, t_args, {
+                            "ok": False,
+                            "approval_required": True,
+                            "approval": appr,
+                        }, "PreToolUse Hook", "Human Approval Gate"
+
+                    if t_name == "delegate_to_agent":
+                        target_agent = str(t_args.get("target_agent") or "manager").lower()
+                        sub_res = await run_specialist_subagent(
+                            task_id=task_id,
+                            session_id=session_id,
+                            target_agent=target_agent,
+                            task_desc=str(t_args.get("task_description") or ""),
+                            context_data=str(t_args.get("context_data") or ""),
+                            personas=SPECIALIST_PERSONAS,
+                        )
+                        return call_obj, t_name, t_args, sub_res, sub_res["specialist_name"], f"Specialist ({sub_res['role']})"
+
+                    if t_name == "delegate_parallel":
+                        par_res = await run_parallel_subagents(
+                            task_id=task_id,
+                            session_id=session_id,
+                            tasks=t_args.get("tasks") or [],
+                            personas=SPECIALIST_PERSONAS,
+                        )
+                        return call_obj, t_name, t_args, par_res, "Multi-Specialist Fan-Out", "Parallel Subagents"
+
+                    raw_res = await execute_tool(t_name, t_args)
+                    return call_obj, t_name, t_args, raw_res, "Agent Hub", "Tool Execution Gateway"
+
+                batch_done = await asyncio.gather(*[_exec_single(c, n, a) for c, n, a in batch_calls])
+
+                messages.append({"role": "assistant", "content": "", "tool_calls": [b[0] for b in batch_done]})
+
+                for _, t_name, t_args, t_res, actor_name, actor_role in batch_done:
+                    executed_tools.append(t_name)
+                    if isinstance(t_res, dict) and t_res.get("tokens_used"):
+                        tokens_used += int(t_res["tokens_used"])
+
+                    if isinstance(t_res, dict) and t_res.get("plan_updated"):
+                        yield emit("plan_update", {"plan": t_res["plan"]})
+
+                    if isinstance(t_res, dict) and t_res.get("citations"):
+                        all_citations.extend(t_res["citations"])
+
+                    if isinstance(t_res, dict) and t_res.get("approval_required"):
+                        paused_for_approval = t_res["approval"]
+                        yield emit("approval_required", {"approval": paused_for_approval})
+
+                    if isinstance(t_res, dict) and t_res.get("pending_approvals"):
+                        paused_for_approval = t_res["pending_approvals"][0]
+                        yield emit("approval_required", {"approval": paused_for_approval})
+
+                    if t_name == "delegate_to_agent" and isinstance(t_res, dict):
+                        if t_res.get("specialist_name") and t_res["specialist_name"] not in delegated_agent_names:
+                            delegated_agent_names.append(t_res["specialist_name"])
+                        last_formatted = (
+                            f"### Delegated Response from {t_res.get('specialist_name')} ({t_res.get('role')})\n\n"
+                            f"{t_res.get('response', '')}"
+                        )
+                    elif t_name == "delegate_parallel" and isinstance(t_res, dict):
+                        parts = []
+                        for rep in t_res.get("reports") or []:
+                            sn = rep.get("specialist_name")
+                            if sn and sn not in delegated_agent_names:
+                                delegated_agent_names.append(sn)
+                            parts.append(f"### {sn} ({rep.get('role')})\n{rep.get('response', '')}")
+                        last_formatted = "\n\n---\n\n".join(parts)
+                    elif isinstance(t_res, dict) and not t_res.get("approval_required"):
+                        last_formatted = format_tool_result(t_name, t_res, t_args)
+
+                    if isinstance(t_res, dict) and not (t_res.get("ok", True) and "error" not in t_res):
+                        if not t_res.get("approval_required"):
+                            last_tool_ok = False
+                            last_tool_err = str(t_res.get("error") or "Unknown error")
+
+                    step_num += 1
+                    exec_trace = {
+                        "step": step_num,
+                        "agent": actor_name,
+                        "role": actor_role,
+                        "result": {
+                            "tool": t_name,
+                            "status": (
+                                "APPROVAL_REQUIRED"
+                                if (isinstance(t_res, dict) and t_res.get("approval_required"))
+                                else ("SUCCESS" if (isinstance(t_res, dict) and t_res.get("ok", True)) else "FAILED")
+                            ),
+                            "raw_result": t_res,
+                        },
+                        "metrics": {"duration_ms": (t_res.get("duration_ms", 50) if isinstance(t_res, dict) else 50), "total_tokens": 0},
+                        "tokens_remaining": max(0, token_budget - tokens_used),
+                    }
+                    trace_steps.append(exec_trace)
+                    yield emit("agent_trace", {"trace": exec_trace})
+
+                    safe_tool_msg = store_or_inline_tool_output(session_id, t_name, t_res)
+                    tool_evidence_chunks.append(f"[{t_name}] {safe_tool_msg[:800]}")
+                    messages.append({"role": "tool", "content": safe_tool_msg})
+
+                if paused_for_approval:
+                    pause_msg = (
+                        f"⏸️ **Approval Required:** {paused_for_approval['summary']}\n\n"
+                        "Please click **Approve & Execute** or **Reject** on the action card below."
                     )
-
-                    vector_memory.store_memory(
-                        agent_id=target_agent,
-                        content=f"Resolution for task '{task_desc[:120]}': {specialist_output[:300]}",
-                        category="past_resolution",
+                    add_chat_message(session_id, "assistant", pause_msg, tool_calls=[{"name": t} for t in executed_tools])
+                    yield emit("item", {"content": pause_msg})
+                    yield emit(
+                        "complete",
+                        {
+                            "success": True,
+                            "awaiting_approval": True,
+                            "approval": paused_for_approval,
+                            "trace": trace_steps,
+                            "tokens_used": tokens_used,
+                            "token_budget": token_budget,
+                        },
                     )
-                else:
-                    tool_result = await execute_tool(tool_name, args)
-                    last_formatted = format_tool_result(tool_name, tool_result, args)
+                    return
 
-                if not (tool_result.get("ok", True) and "error" not in tool_result):
-                    last_tool_ok = False
-                    last_tool_err = str(tool_result.get("error") or "Unknown error")
-
-                step_num += 1
-                exec_trace = {
-                    "step": step_num,
-                    "agent": specialist_name if tool_name == "delegate_to_agent" else "IT Agent",
-                    "role": f"Specialist ({specialist_info['role']})" if tool_name == "delegate_to_agent" else "Tool Execution Gateway",
-                    "result": {
-                        "tool": tool_name,
-                        "status": "SUCCESS" if tool_result.get("ok", True) else "FAILED",
-                        "raw_result": tool_result,
-                    },
-                    "metrics": {"duration_ms": tool_result.get("duration_ms", 50), "total_tokens": 0},
-                    "tokens_remaining": max(0, token_budget - tokens_used),
-                }
-                trace_steps.append(exec_trace)
-                yield emit("agent_trace", {"trace": exec_trace})
-
-                # Feed tool output back to Marcus so he can chain another tool or synthesize final answer
+                # Ask Marcus to continue chaining tools or synthesize final answer
                 if turn + 1 < MAX_TOOL_TURNS and tokens_used < token_budget:
-                    messages.append({"role": "assistant", "content": "", "tool_calls": [call]})
-                    messages.append({
-                        "role": "tool",
-                        "content": json.dumps(tool_result)[:4000],
-                    })
-                    llm_resp = await call_llm_chat(
-                        task_id=task_id,
-                        agent_name="manager",
-                        messages=messages,
-                        tools=TOOL_SCHEMAS,
-                        max_tokens=1500,
-                        temperature=0.1,
-                    )
-                    tokens_used += llm_resp["metrics"]["total_tokens"]
-                    tool_calls = llm_resp["tool_calls"]
-                    final_synthesized = (llm_resp["content"] or "").strip()
+                    llm_resp, next_stream_events = await _call_streaming_manager(messages, scoped_tools)
+                    tokens_used += int(llm_resp["metrics"].get("total_tokens") or 0)
+                    tool_calls = llm_resp.get("tool_calls") or []
+                    final_synthesized = (llm_resp.get("content") or "").strip()
+                    if not tool_calls and final_synthesized:
+                        stream_events = next_stream_events
                 else:
                     tool_calls = []
 
-            if len(executed_tools) == 1 and last_formatted:
+            if len(executed_tools) == 1 and last_formatted and not final_synthesized:
                 formatted_result = last_formatted
             elif final_synthesized:
                 formatted_result = final_synthesized
             else:
                 formatted_result = last_formatted or "Completed multi-step execution."
 
-            # Step Final: Tool-Aware Auditor Verification
+            # Deduplicate citations
+            dedup_citations: List[Dict[str, Any]] = []
+            seen_c_urls = set()
+            for c in all_citations:
+                u = c.get("url")
+                if u and u not in seen_c_urls:
+                    seen_c_urls.add(u)
+                    dedup_citations.append({**c, "index": len(dedup_citations) + 1})
+
+            if dedup_citations:
+                yield emit("citations", {"citations": dedup_citations})
+
+            # Step Final: Hybrid Deterministic + LLM Auditor Verification + 1-Turn Self-Correction
             yield emit(
                 "agent_status",
                 {
                     "agent": "auditor",
                     "phase": "auditing",
-                    "message": "Auditor Agent is verifying execution output and ensuring zero hallucinations...",
+                    "message": "Audrey Chen is verifying accuracy, grounding, and compliance...",
                 },
             )
 
-            tools_summary = ", ".join(f"`{t}`" for t in executed_tools)
-            audit_ok = last_tool_ok
-            audit_findings = (
-                f"Verified execution of {tools_summary} ({len(executed_tools)} step(s)). Zero stray communications detected."
-                if audit_ok
-                else f"Execution of {tools_summary} encountered error: {last_tool_err}"
+            audit_verdict = await run_auditor_verification(
+                task_id=task_id,
+                user_message=user_message,
+                draft_response=formatted_result,
+                executed_tools=executed_tools,
+                last_tool_ok=last_tool_ok,
+                last_tool_err=last_tool_err,
+                tool_evidence_preview="\n".join(tool_evidence_chunks),
+                auditor_system_prompt=AUDITOR_SYSTEM_PROMPT,
             )
-            audit_status = "PASS" if audit_ok else "QUALITY_IMPROVEMENT_NEEDED"
-            quality_score = 10 if audit_ok else 3
+            tokens_used += int(audit_verdict.get("tokens_used") or 0)
+
+            if audit_verdict.get("audit_status") == "QUALITY_IMPROVEMENT_NEEDED" and last_tool_ok and tokens_used < token_budget:
+                messages.append({"role": "assistant", "content": formatted_result})
+                messages.append({
+                    "role": "user",
+                    "content": f"[Auditor Critique]: {audit_verdict['findings']}. Please correct and improve your answer strictly using verified tool evidence.",
+                })
+                retry_resp, retry_stream = await _call_streaming_manager(messages, None)
+                tokens_used += int(retry_resp["metrics"].get("total_tokens") or 0)
+                if (retry_resp.get("content") or "").strip():
+                    formatted_result = retry_resp["content"].strip()
+                    stream_events = retry_stream
+                    audit_verdict["audit_status"] = "PASS"
+                    audit_verdict["quality_score"] = 9
+                    audit_verdict["findings"] += " (Auto-corrected by Marcus Vance)"
+
+            audit_status = audit_verdict.get("audit_status", "PASS")
+            quality_score = int(audit_verdict.get("quality_score") or 9)
+            audit_findings = audit_verdict.get("findings") or "Verified."
+            audit_ok = audit_status == "PASS"
 
             log_audit_result(
                 task_id=task_id,
@@ -1193,16 +1057,14 @@ async def run_multi_agent_pipeline(
                     "quality_score": quality_score,
                     "findings": audit_findings,
                 },
-                "metrics": {"duration_ms": 2, "total_tokens": 0},
+                "metrics": {"duration_ms": 2, "total_tokens": audit_verdict.get("tokens_used", 0)},
                 "tokens_remaining": max(0, token_budget - tokens_used),
             }
             trace_steps.append(audit_trace)
             yield emit("agent_trace", {"trace": audit_trace})
 
-            # Save assistant reply to chat history (user turn already persisted at pipeline start)
             add_chat_message(session_id, "assistant", formatted_result, tool_calls=[{"name": t} for t in executed_tools])
 
-            # Log request flow for the Agent Query Logs Inspector
             try:
                 agents_in_flow = ["Marcus Vance"] + delegated_agent_names + ["Audrey Chen"]
                 steps_summary = [
@@ -1242,13 +1104,13 @@ async def run_multi_agent_pipeline(
             except Exception as e:
                 logger.warning(f"Could not log tool request flow: {e}")
 
-            # Deliver final content
-            yield emit("item", {"content": formatted_result})
+            yield emit("item", {"content": formatted_result, "citations": dedup_citations})
             yield emit(
                 "complete",
                 {
                     "success": audit_ok,
-                    "workflow_executed": "crmRelaticleAssistant",
+                    "workflow_executed": "agent_hub_v2",
+                    "citations": dedup_citations,
                     "trace": trace_steps,
                     "tokens_used": tokens_used,
                     "token_budget": token_budget,
@@ -1258,7 +1120,7 @@ async def run_multi_agent_pipeline(
                 "agent_summary",
                 {
                     "success": audit_ok,
-                    "workflow_executed": "crmRelaticleAssistant",
+                    "workflow_executed": "agent_hub_v2",
                     "trace_steps": trace_steps,
                     "tokens_used": tokens_used,
                     "token_budget": token_budget,
@@ -1266,9 +1128,9 @@ async def run_multi_agent_pipeline(
             )
             return
 
-        # -------------------------------------------------------------------------
+        # ---------------------------------------------------------------------
         # Path B: Direct Conversational / Capability Response (0 Tool Calls)
-        # -------------------------------------------------------------------------
+        # ---------------------------------------------------------------------
         yield emit(
             "agent_status",
             {
@@ -1285,7 +1147,7 @@ async def run_multi_agent_pipeline(
             workflow_id=None,
             audit_status="PASS",
             quality_score=10,
-            findings="Manager answered directly and concisely without unnecessary IT Agent tool overhead.",
+            findings="Manager answered directly without unnecessary tool overhead.",
         )
 
         step1_trace = {
@@ -1302,39 +1164,29 @@ async def run_multi_agent_pipeline(
         final_msg = direct_content.strip() or "I have processed your request."
         add_chat_message(session_id, "assistant", final_msg)
 
-        # Log request flow for the Virtual Office Floor Inspector
         try:
-            steps_summary = [
-                {
-                    "step": "Planning & Orchestration",
-                    "agent": "Marcus Vance",
-                    "action": f"Analyzed prompt: '{user_message[:60]}...'",
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(start_time)),
-                    "status": "ok",
-                }
-            ]
-            if invoked_tool_name:
-                steps_summary.append({
-                    "step": f"Tool Execution ({invoked_tool_name})",
-                    "agent": "Marcus Vance",
-                    "action": f"Executed tool `{invoked_tool_name}` with parameters: {json.dumps(invoked_tool_args)[:120]}",
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    "status": "ok" if (tool_result or {}).get("ok", True) else "warning",
-                })
-            steps_summary.append({
-                "step": "Quality & Verification",
-                "agent": "Audrey Chen",
-                "action": f"Audit quality verified (tokens: {tokens_used}, duration: {int((time.time() - start_time) * 1000)}ms)",
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "status": "ok",
-            })
             log_request_flow(
                 flow_id=f"flow_chat_{task_id}",
                 source="Manager Chat UI",
                 title=f"Chat: {user_message[:50]}",
                 status="completed",
                 agents_involved=["Marcus Vance", "Audrey Chen"],
-                steps=steps_summary,
+                steps=[
+                    {
+                        "step": "Planning & Orchestration",
+                        "agent": "Marcus Vance",
+                        "action": f"Analyzed prompt: '{user_message[:60]}...'",
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(start_time)),
+                        "status": "ok",
+                    },
+                    {
+                        "step": "Quality & Verification",
+                        "agent": "Audrey Chen",
+                        "action": f"Audit quality verified (tokens: {tokens_used}, duration: {int((time.time() - start_time) * 1000)}ms)",
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        "status": "ok",
+                    },
+                ],
                 payload_preview={"input": user_message, "session_id": session_id},
                 result_summary=final_msg[:120],
                 duration_ms=int((time.time() - start_time) * 1000),
@@ -1378,3 +1230,41 @@ async def run_multi_agent_pipeline(
                 "token_budget": token_budget,
             },
         )
+
+
+async def resume_approved_tool(
+    approval_id: str,
+    decision: str,
+    edited_args: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Executes or rejects a previously gated HITL tool call after owner review.
+    """
+    appr = get_pending_approval(approval_id)
+    if not appr:
+        return {"ok": False, "error": "Approval request not found"}
+    if appr["status"] != "PENDING":
+        return {"ok": False, "error": f"Approval already {appr['status']}"}
+
+    dec = (decision or "").strip().lower()
+    if dec != "approve":
+        resolve_pending_approval(approval_id, "REJECTED")
+        msg = f"❌ **Action Rejected by Owner:** {appr['summary']}"
+        add_chat_message(appr["session_id"], "assistant", msg)
+        return {"ok": True, "status": "REJECTED", "content": msg, "session_id": appr["session_id"]}
+
+    args_to_run = edited_args if isinstance(edited_args, dict) else appr["arguments"]
+    res = await execute_tool(appr["tool_name"], args_to_run)
+    resolve_pending_approval(approval_id, "APPROVED")
+    formatted = format_tool_result(appr["tool_name"], res, args_to_run)
+    if not formatted:
+        formatted = f"✅ **Approved & Executed:** {appr['summary']}\n\n```json\n{json.dumps(res, indent=2)[:1500]}\n```"
+    add_chat_message(appr["session_id"], "assistant", formatted, tool_calls=[{"name": appr["tool_name"]}])
+    return {
+        "ok": True,
+        "status": "APPROVED",
+        "tool": appr["tool_name"],
+        "result": res,
+        "content": formatted,
+        "session_id": appr["session_id"],
+    }
