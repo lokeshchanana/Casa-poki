@@ -202,6 +202,9 @@ async def handle_open_house_sign_in(payload: Dict[str, Any]) -> Dict[str, Any]:
             patch_payload["phones"] = {"primaryPhoneNumber": phone}
         if email and not (found_person.get("emails") or {}).get("primaryEmail"):
             patch_payload["emails"] = {"primaryEmail": email}
+            patch_payload["canEmail"] = True
+        elif not email and not (found_person.get("emails") or {}).get("primaryEmail"):
+            patch_payload["canEmail"] = False
         await crm_patch(f"/rest/people/{person_id}", patch_payload)
     else:
         steps.append({
@@ -216,7 +219,7 @@ async def handle_open_house_sign_in(payload: Dict[str, Any]) -> Dict[str, Any]:
             "leadSource": "Open House",
             "contactRole": "Customer",
             "market": city,
-            "canEmail": True,
+            "canEmail": bool(email),
         }
         if email:
             create_payload["emails"] = {"primaryEmail": email}
@@ -395,7 +398,7 @@ async def handle_website_contact(payload: Dict[str, Any]) -> Dict[str, Any]:
             "name": {"firstName": first_name, "lastName": last_name},
             "leadSource": "Website",
             "contactRole": "Customer",
-            "canEmail": True,
+            "canEmail": bool(email),
             "emails": {"primaryEmail": email} if email else None,
             "phones": {"primaryPhoneNumber": phone} if phone else None,
         })

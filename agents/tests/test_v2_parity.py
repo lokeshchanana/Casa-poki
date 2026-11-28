@@ -104,6 +104,41 @@ class TestAgentHubV2Parity(unittest.TestCase):
         self.assertTrue(res["ok"])
         self.assertIn("Invoice #991", res["extracted_text"])
 
+    def test_brevo_blacklist_rule_buyer_vs_customer(self):
+        from unittest.mock import AsyncMock, MagicMock
+        import brevo_sync
+
+        self.assertTrue(brevo_sync._is_buyer_or_past_client({"contactRole": "Buyer"}))
+        self.assertTrue(brevo_sync._is_buyer_or_past_client({"contactRole": "Customer", "lifecycleStage": "Past Client"}))
+        self.assertFalse(brevo_sync._is_buyer_or_past_client({"contactRole": "Customer", "lifecycleStage": "Lead"}))
+
+        mock_client = MagicMock()
+        mock_client.patch = AsyncMock(return_value=MagicMock(status_code=200))
+        mock_client.delete = AsyncMock(return_value=MagicMock(status_code=200))
+
+        # Buyer -> kept + PATCH canEmail=False
+        act_buyer = asyncio.run(
+            brevo_sync._apply_brevo_blacklist_to_person(
+                mock_client,
+                {"id": "p1", "contactRole": "Buyer", "canEmail": True},
+                "lokeshchanana@gmail.com",
+            )
+        )
+        self.assertIn("canEmail = false", act_buyer)
+        mock_client.patch.assert_awaited_once()
+        mock_client.delete.assert_not_awaited()
+
+        # Customer -> deleted
+        act_cust = asyncio.run(
+            brevo_sync._apply_brevo_blacklist_to_person(
+                mock_client,
+                {"id": "p2", "contactRole": "Customer", "canEmail": True},
+                "lokeshchanana@gmail.com",
+            )
+        )
+        self.assertIn("Deleted Customer", act_cust)
+        mock_client.delete.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()

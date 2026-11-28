@@ -345,20 +345,8 @@ async def webhook_infra_alert(req: Request) -> JSONResponse:
 
 @app.post("/webhook/twenty-brevo-sync")
 async def webhook_brevo_sync(req: Request) -> JSONResponse:
-    return JSONResponse(content={"ok": True, "message": "Brevo sync acknowledged by Agent Hub."})
-
-
-@app.post("/webhook/brevo-event-webhook")
-async def webhook_brevo_event(req: Request) -> JSONResponse:
-    try:
-        body = await req.json()
-    except Exception:
-        body = {}
-    event = body.get("event")
-    email = body.get("email")
-    if email and event in ("unsubscribed", "hard_bounce", "complaint"):
-        cancel_post_close_drip(email)
-    return JSONResponse(content={"ok": True, "message": "Brevo event acknowledged by Agent Hub."})
+    res = await sync_twenty_to_brevo()
+    return JSONResponse(content=res)
 
 
 @app.post("/webhook/post-close-enroll")

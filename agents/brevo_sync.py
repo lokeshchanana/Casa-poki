@@ -110,10 +110,62 @@ async def sync_single_contact_to_brevo(
         return {"ok": False, "error": str(exc)}
 
 
+def _is_buyer_or_past_client(person: Dict[str, Any]) -> bool:
+    """Returns True if contact is a Buyer or Past Client (must be preserved with canEmail=False)."""
+    role = str(person.get("contactRole") or "").strip().lower()
+    stage = str(person.get("lifecycleStage") or "").strip().lower()
+    past_type = str(person.get("pastClientType") or "").strip().lower()
+    return "buyer" in role or "past" in stage or bool(past_type)
+
+
+async def _apply_brevo_blacklist_to_person(
+    client: httpx.AsyncClient,
+    person: Dict[str, Any],
+    email: str,
+) -> str:
+    """
+    Owner compliance rule:
+    - Buyer or Past Client -> Keep in Twenty CRM and mark canEmail = False.
+    - Customer / generic -> Delete from Twenty CRM.
+    """
+    person_id = person.get("id")
+    if not person_id:
+        return "Contact missing ID in Twenty CRM"
+
+    if _is_buyer_or_past_client(person):
+        if person.get("canEmail") is False:
+            return "Already marked canEmail = false (Buyer/Past Client)"
+        patch_res = await client.patch(
+            f"{TWENTY_BASE_URL}/rest/people/{person_id}",
+            headers=_twenty_headers(),
+            json={"canEmail": False},
+        )
+        return (
+            "Kept Buyer/Past Client in Twenty CRM and marked canEmail = false"
+            if 200 <= patch_res.status_code < 300
+            else f"Failed to mark canEmail = false (HTTP {patch_res.status_code})"
+        )
+
+    del_res = await client.delete(
+        f"{TWENTY_BASE_URL}/rest/people/{person_id}",
+        headers=_twenty_headers(),
+    )
+    return (
+        "Deleted Customer from Twenty CRM"
+        if 200 <= del_res.status_code < 300
+        else f"Failed to delete Customer from Twenty CRM (HTTP {del_res.status_code})"
+    )
+
+
 async def handle_brevo_event(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Handles Brevo unsubscribe / hardBounce / complaint / spam events by deleting the contact from Twenty CRM."""
+    """
+    Handles Brevo unsubscribe / hardBounce / complaint / spam events:
+    - Cancels any active post-close drip.
+    - Buyer / Past Client -> Keep and set canEmail = False.
+    - Customer -> Delete from Twenty CRM.
+    """
     event = (payload.get("event") or "").strip().lower()
-    if event not in ("unsubscribed", "hard_bounce", "hardbounce", "complaint", "spam"):
+    if event not in ("unsubscribed", "unsubscribe", "hard_bounce", "hardbounce", "complaint", "spam"):
         return {"success": False, "reason": f"Unhandled Brevo event '{event}'"}
 
     email = (payload.get("email") or "").strip().lower()
@@ -130,16 +182,7 @@ async def handle_brevo_event(payload: Dict[str, Any]) -> Dict[str, Any]:
         )
         people = (find_res.json().get("data") or {}).get("people") or []
         if people:
-            person_id = people[0].get("id")
-            del_res = await client.delete(
-                f"{TWENTY_BASE_URL}/rest/people/{person_id}",
-                headers=_twenty_headers(),
-            )
-            action = (
-                "Deleted from Twenty CRM"
-                if 200 <= del_res.status_code < 300
-                else f"Failed to delete from Twenty CRM (HTTP {del_res.status_code})"
-            )
+            action = await _apply_brevo_blacklist_to_person(client, people[0], email)
         else:
             action = "Contact not found in Twenty CRM"
 
@@ -157,12 +200,98 @@ async def handle_brevo_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"success": True, "event": event, "email": email, "action": action}
 
 
+async def reconcile_brevo_blacklists(
+    client: Optional[httpx.AsyncClient] = None,
+    twenty_people: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Two-way safety net: fetches all emailBlacklisted contacts from Brevo and ensures
+    every matching Twenty CRM contact is either deleted (Customer) or marked canEmail=False (Buyer/Past Client).
+    """
+    if not BREVO_API_KEY or not TWENTY_API_KEY:
+        return {"ok": False, "reconciled": 0, "blacklisted_emails": set()}
+
+    owns_client = client is None
+    if owns_client:
+        client = httpx.AsyncClient(timeout=20.0)
+
+    blacklisted_emails = set()
+    reconciled_actions: List[Dict[str, str]] = []
+    try:
+        offset = 0
+        limit = 100
+        while True:
+            r = await client.get(
+                f"{BREVO_BASE_URL}/contacts?limit={limit}&offset={offset}",
+                headers=_brevo_headers(),
+            )
+            if r.status_code >= 400:
+                break
+            batch = (r.json() or {}).get("contacts") or []
+            for c in batch:
+                em = (c.get("email") or "").strip().lower()
+                if em and c.get("emailBlacklisted"):
+                    blacklisted_emails.add(em)
+            if len(batch) < limit:
+                break
+            offset += limit
+
+        if twenty_people is None:
+            t_res = await client.get(f"{TWENTY_BASE_URL}/rest/people?limit=500", headers=_twenty_headers())
+            twenty_people = ((t_res.json() or {}).get("data") or {}).get("people") or []
+
+        for p in twenty_people:
+            em = ((p.get("emails") or {}).get("primaryEmail") or "").strip().lower()
+            if not em or em not in blacklisted_emails:
+                continue
+            # Skip already-marked Buyer/Past Client to avoid redundant writes
+            if _is_buyer_or_past_client(p) and p.get("canEmail") is False:
+                continue
+            cancel_post_close_drip(em)
+            act = await _apply_brevo_blacklist_to_person(client, p, em)
+            reconciled_actions.append({"email": em, "action": act})
+            log_request_flow(
+                flow_id=f"brevo_reconcile_{em}",
+                source="Brevo Compliance Reconciliation",
+                title=f"Brevo Blacklist Sync: {em}",
+                status="completed",
+                agents_involved=["Miles Miller", "Maya Reyes"],
+                steps=[{"step": "Blacklist Reconciliation", "agent": "Miles Miller", "action": act, "status": "ok"}],
+                payload_preview={"email": em},
+                result_summary=act,
+                category="crm",
+            )
+    finally:
+        if owns_client:
+            await client.aclose()
+
+    return {
+        "ok": True,
+        "blacklisted_count": len(blacklisted_emails),
+        "reconciled": len(reconciled_actions),
+        "details": reconciled_actions,
+        "blacklisted_emails": blacklisted_emails,
+    }
+
+
 async def sync_twenty_to_brevo() -> Dict[str, Any]:
-    """Full Twenty CRM -> Brevo contact sync across all role lists."""
+    """Full two-way compliance reconciliation + Twenty CRM -> Brevo contact sync across all role lists."""
     if not BREVO_API_KEY or not TWENTY_API_KEY:
         return {"success": False, "error": "Missing BREVO_API_KEY or TWENTY_API_KEY"}
 
     async with httpx.AsyncClient(timeout=20.0) as client:
+        twenty_res = await client.get(f"{TWENTY_BASE_URL}/rest/people?limit=500", headers=_twenty_headers())
+        people = ((twenty_res.json() or {}).get("data") or {}).get("people") or []
+
+        # Step 1: Pull Brevo unsubscribes/bounces -> Twenty CRM before pushing
+        recon = await reconcile_brevo_blacklists(client=client, twenty_people=people)
+        blacklisted_emails = recon.get("blacklisted_emails") or set()
+
+        # Refresh people list if any contacts were deleted/updated during reconciliation
+        if recon.get("reconciled", 0) > 0:
+            twenty_res = await client.get(f"{TWENTY_BASE_URL}/rest/people?limit=500", headers=_twenty_headers())
+            people = ((twenty_res.json() or {}).get("data") or {}).get("people") or []
+
         list_res = await client.get(f"{BREVO_BASE_URL}/contacts/lists?limit=50", headers=_brevo_headers())
         brevo_lists = (list_res.json() or {}).get("lists") or []
         list_map: Dict[str, int] = {
@@ -172,16 +301,13 @@ async def sync_twenty_to_brevo() -> Dict[str, Any]:
         }
         default_list_id = list_map.get("customer", 3)
 
-        twenty_res = await client.get(f"{TWENTY_BASE_URL}/rest/people?limit=500", headers=_twenty_headers())
-        people = ((twenty_res.json() or {}).get("data") or {}).get("people") or []
-
         synced = 0
         skipped_no_email = 0
         failed = 0
 
         for p in people:
             email = ((p.get("emails") or {}).get("primaryEmail") or "").strip().lower()
-            if not email or p.get("canEmail") is False:
+            if not email or p.get("canEmail") is False or email in blacklisted_emails:
                 skipped_no_email += 1
                 continue
 
